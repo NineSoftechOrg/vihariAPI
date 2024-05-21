@@ -8,6 +8,12 @@ from bson import json_util
 import json
 import os
 import razorpay
+import certifi
+
+
+
+ca = certifi.where()
+
 
 
 
@@ -18,7 +24,7 @@ app = Flask(__name__)
 
 
 
-client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", server_api=ServerApi('1'))
+client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", tlsCAFile=ca)
 
 db = client["vihari"]
 CORS(app, resources={r"/*": {"origins": "*"}})
