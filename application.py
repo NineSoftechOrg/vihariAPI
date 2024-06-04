@@ -37,19 +37,10 @@ def start():
     return "Vihari api is working....."
 
 
-@app.route('/distance')
-def distance():
-    my_dist = gmaps.distance_matrix('Delhi','Mumbai')['rows'][0]['elements'][0]
-    print(my_dist)
-    payload = {
-        "distance": my_dist['distance']['text'],
-        "duration": my_dist['duration']['text']
-    }
-    return payload
-
 @app.route('/order', methods=["POST"])
 def order():
     incoming_msg = request.get_json();
+
     razor = razorpay.Client(auth=("rzp_live_nma9bpaQRoARQg", "re38c3NxNAoGlfKs4aDPJPq8"))
 
     options = {
@@ -132,26 +123,52 @@ def pricing():
 
 @app.route('/setBooking', methods=["POST"])
 def setBooking():
-        incoming_msg = request.get_json();
-        customer = db['Customer']
-        payload = {
-            "orginZone": incoming_msg['originZone'],
-            "to": incoming_msg['to'],
-            "duration": incoming_msg['duration'],
-            "distance": incoming_msg['distance'],
-            "paymentId": incoming_msg['paymentId'],
-            "price": incoming_msg['price']
-
-        }
-        user = customer.update_one({
-            "email": incoming_msg['email'],
-        } , {
-            '$push': {
-                "booking_history": payload
-            }
-        }
+        incoming_msg = request.get_json()['Body'];
+        customer = db['Customer'].find_one({"firstname": incoming_msg['firstname']})
+        bookings = db['Bookings']
+        vehicles = db['Vehicles']
+        zone = db["Zone"].find_one({'zone_name': incoming_msg['from'][:-1].upper()})
         
-        )
+        capacity = vehicles.find_one({"vehicle_name": incoming_msg['vehicleName'], "zone_id": zone['_id']})
+        print(capacity)
+        carZone = db['Zone'].find_one({"_id": capacity['zone_id']})
+        # print(capacity)
+        if incoming_msg['payment_type'] == 'COD':
+            payload = {
+                "orginZone": incoming_msg['from'],
+                "to": incoming_msg['to'],
+                "duration": incoming_msg['duration'],
+                "distance": incoming_msg['distance'],
+                "paymentId": incoming_msg['paymentId'] if incoming_msg['payment_type'] != "COD" else "",
+                "total_trip_price": incoming_msg['price'],
+                "trip_type": incoming_msg['tripType'],
+                'trip_start_datetime': incoming_msg['time'],
+                'trip_end_datetime': incoming_msg['trip_end_datetime'],
+                'car_capacity': capacity['capacity'],
+                'travel_date': incoming_msg['travel_date'],
+                'car_type': incoming_msg['car_model'],
+                'car_zone': carZone['zone_name'],
+                'car_info': capacity['vehicle_name'] + ": Brand" + capacity['brand'],
+                'booking_price': '',
+                'payment_status': 'Paid' if incoming_msg['payment_type'] != "COD" else "PENDING",
+                'payment_type': incoming_msg['payment_type'],
+                'user_id': customer['_id'],
+                'extra_payment_details': '',
+                'status': 'Booked'
+
+            }
+           
+            user = db["Customer"].update_one({
+                "email": incoming_msg['email'],
+            } , {
+                '$push': {
+                    "booking_history": payload
+                }
+            }
+            
+            )
+            bookings.insert_one(payload)
+            return "updated booking"
 
         return "working......"
 
@@ -434,8 +451,8 @@ def createVehicle():
         "vehicle_type": incoming_msg["vehicleType"],
         "brand": incoming_msg["brand"],
         "capacity": incoming_msg["capacity"],
-        "zone": zone,
         "mileage": incoming_msg["mileage"],
+        'zone': zone,
         "vehicle_owner": incoming_msg["ownerType"],
         "cost_per_km_one_way": incoming_msg["costPerKmOneWay"],
         "cost_per_km": incoming_msg["costPerKm"],
@@ -477,16 +494,19 @@ def getPrice():
     durationHours = my_dist['duration']['text'].split(' ')[0] if tripType == 'oneWay' else incoming_msg['trip_duration'].split(' ')[0]
     durationMinutes = my_dist['duration']['text'].split(' ')[2] if tripType == 'oneWay' else incoming_msg['trip_duration'].split(' ')[2]
     allDuration = int(durationHours) if int(durationMinutes) == 0 else int(durationHours) + 1
-    payload = {
+    
+    # print(distance, allDuration)
+    if user:
+        price = calculateOneWayPricing(zoneName, int(distance), allDuration, tripType)
+        
+        payload = {
          'originZone': zoneName,
         'toLocation': destination,
         'duration': allDuration,
         'distance': int(distance),
+        "price": price
 
-    }
-    print(distance, allDuration)
-    if user:
-        price = calculateOneWayPricing(zoneName, int(distance), allDuration, tripType)
+        }
         db['Customer'].update_one(
             {'firstname': user['firstname']},
             {
@@ -495,11 +515,19 @@ def getPrice():
                 }
             }
             )
-        return price
+        return payload
 
     else:
         price = calculateOneWayPricing(zoneName, int(distance), allDuration, tripType)
-        return  price
+        payload = {
+         'originZone': zoneName,
+        'toLocation': destination,
+        'duration': allDuration,
+        'distance': int(distance),
+        "price": price
+
+    }
+        return  payload
     
     
 
@@ -510,7 +538,7 @@ def getPrice():
 
 def calculateOneWayPricing(nameZone, distance, duration, trip):
     zone = db["Zone"]
-    zoneName = zone.find_one({'zone_name':nameZone })
+    zoneName = zone.find_one({'zone_name':nameZone.upper() })
     # pricePerKM = zoneName['price_per_km']
     # priceperKmRoundTrip = zoneName['price_perkm_round']
     price = {
