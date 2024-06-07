@@ -127,9 +127,10 @@ def setBooking():
         customer = db['Customer'].find_one({"firstname": incoming_msg['firstname']})
         bookings = db['Bookings']
         vehicles = db['Vehicles']
-        zone = db["Zone"].find_one({'zone_name': incoming_msg['from'][:-1].upper()})
+        zone = db["Zone"].find_one({'zone_name': incoming_msg['from'].upper()})
+        # print(incoming_msg['car_model'])
+        capacity = vehicles.find_one({"vehicle_type": incoming_msg['car_model'], "zone_id": zone['_id']})
         
-        capacity = vehicles.find_one({"vehicle_name": incoming_msg['vehicleName'], "zone_id": zone['_id']})
         print(capacity)
         carZone = db['Zone'].find_one({"_id": capacity['zone_id']})
         # print(capacity)
@@ -143,7 +144,7 @@ def setBooking():
                 "total_trip_price": incoming_msg['price'],
                 "trip_type": incoming_msg['tripType'],
                 'trip_start_datetime': incoming_msg['time'],
-                'trip_end_datetime': incoming_msg['trip_end_datetime'],
+                'trip_end_datetime': incoming_msg['trip_end_datetime'] if incoming_msg['tripType'] == "roundTrip" else "",
                 'car_capacity': capacity['capacity'],
                 'travel_date': incoming_msg['travel_date'],
                 'car_type': incoming_msg['car_model'],
@@ -306,9 +307,9 @@ def createCustomer():
     customer = db['Customer']
     drivers = db['Driver']
     email = customer.find_one({"email": incoming_msg['email']})
-    driver_check = drivers.find_one({"mobile": incoming_msg['mobile']})
-    customer_check = db['Customer'].find_one({"mobile": incoming_msg['mobile']})
-    vendor_check = db['Vendors'].find_one({"mobile": incoming_msg['mobile']})
+    driver_check = drivers.find_one({"mobile": incoming_msg['phoneNumber']})
+    customer_check = db['Customer'].find_one({"mobile": incoming_msg['phoneNumber']})
+    vendor_check = db['Vendors'].find_one({"mobile": incoming_msg['phoneNumber']})
     if driver_check or customer_check or vendor_check or email:
         return "this number already used or email", 404
 
@@ -538,7 +539,10 @@ def getPrice():
 
 def calculateOneWayPricing(nameZone, distance, duration, trip):
     zone = db["Zone"]
+    
     zoneName = zone.find_one({'zone_name':nameZone.upper() })
+    vehicles = db['Vehicles'].find({"zone_id": zoneName['_id']})
+    # print(list(vehicles))
     # pricePerKM = zoneName['price_per_km']
     # priceperKmRoundTrip = zoneName['price_perkm_round']
     price = {
@@ -547,9 +551,13 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
         'Hatchback': '',
         'Sedan': ''
     }
+    cars = []
+    for i in list(vehicles):
+        # print(i['vehicle_type'])
+        cars.append(i['vehicle_type'])
     # type = cars.find_one({"vehicle_type": car})
-    cars = ['SUV', 'MUV', 'Hatchback', 'Sedan']
-    # print(duration)
+    # cars = ['SUV', 'MUV', 'Hatchback', 'Sedan']
+    print(cars)
     if trip == 'oneWay':
         for i in cars:
             for j in zoneName[i]['hourly_price']:
