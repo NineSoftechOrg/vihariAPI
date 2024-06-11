@@ -75,7 +75,7 @@ def zone():
             'hourly_price': [],
             'hourly_price_round':[],
             "total_drivers": driver,
-            "status": ""
+            "status": "active"
         }
 
         zone.insert_one(zone_dict)
@@ -134,44 +134,54 @@ def setBooking():
         print(capacity)
         carZone = db['Zone'].find_one({"_id": capacity['zone_id']})
         # print(capacity)
-        if incoming_msg['payment_type'] == 'COD':
-            payload = {
-                "orginZone": incoming_msg['from'],
-                "to": incoming_msg['to'],
-                "duration": incoming_msg['duration'],
-                "distance": incoming_msg['distance'],
-                "paymentId": incoming_msg['paymentId'] if incoming_msg['payment_type'] != "COD" else "",
-                "total_trip_price": incoming_msg['price'],
-                "trip_type": incoming_msg['tripType'],
-                'trip_start_datetime': incoming_msg['time'],
-                'trip_end_datetime': incoming_msg['trip_end_datetime'] if incoming_msg['tripType'] == "roundTrip" else "",
-                'car_capacity': capacity['capacity'],
-                'travel_date': incoming_msg['travel_date'],
-                'car_type': incoming_msg['car_model'],
-                'car_zone': carZone['zone_name'],
-                'car_info': capacity['vehicle_name'] + ": Brand" + capacity['brand'],
-                'booking_price': '',
-                'payment_status': 'Paid' if incoming_msg['payment_type'] != "COD" else "PENDING",
-                'payment_type': incoming_msg['payment_type'],
-                'user_id': customer['_id'],
-                'extra_payment_details': '',
-                'status': 'Booked'
+        
+        payload = {
+            "orginZone": incoming_msg['from'],
+            "to": incoming_msg['to'],
+            "duration": incoming_msg['duration'],
+            "distance": incoming_msg['distance'],
+            "paymentId": incoming_msg['paymentId'] if incoming_msg['payment_type'] != "COD" else "",
+            "total_trip_price": incoming_msg['price'],
+            "trip_type": incoming_msg['tripType'],
+            'trip_start_datetime': incoming_msg['time'],
+            'trip_end_datetime': incoming_msg['trip_end_datetime'] if incoming_msg['tripType'] == "roundTrip" else "",
+            'car_capacity': capacity['capacity'],
+            'travel_date': incoming_msg['travel_date'],
+            'car_type': incoming_msg['car_model'],
+            'car_zone': carZone['zone_name'],
+            'car_info': '',
+            'booking_price': '',
+            'payment_status': 'Paid' if incoming_msg['payment_type'] != "COD" else "PENDING",
+            'payment_type': incoming_msg['payment_type'],
+            'user_id': customer['_id'],
+            'extra_payment_details': '',
+            'status': 'Booked'
 
+        }
+        
+        user = db["Customer"].update_one({
+            "email": incoming_msg['email'],
+        } , {
+            '$push': {
+                "booking_history": payload
             }
-           
-            user = db["Customer"].update_one({
-                "email": incoming_msg['email'],
-            } , {
-                '$push': {
-                    "booking_history": payload
-                }
-            }
-            
-            )
-            bookings.insert_one(payload)
-            return "updated booking"
+        }
+        
+        )
+        bookings.insert_one(payload)
+        j = list(bookings.find())[-1]
+        # print(j['_id'])
+        return {
+            "bookingId":str(j['_id'])
+        }
 
-        return "working......"
+
+@app.route('/getBookings')
+def getBookings():
+    bookins = db['Bookings']
+    all = list(bookins.find())
+    return json.loads(json_util.dumps(all))
+
 
 @app.route('/getZones')
 def getzones():
@@ -231,6 +241,39 @@ def getZoneAdmins():
     
     return json.loads(json_util.dumps(zoneadmin_list))
 
+@app.route('/trips')
+def trips():
+    bookings = db['Bookings']
+    vehicles = db["Vehicles"]
+    zone = db["Zone"]
+    driver = db['Driver']
+    # print(list(driver))
+    all = list(bookings.find())
+    f = []
+    
+    # print(vehicle)
+    for i in all:
+        zones = i['orginZone']
+        vehicle_type = i['car_type']
+        
+        f.append(
+            {
+               "orderId": i["_id"],
+               "originZone": i['orginZone'],
+               "destination": i['to'],
+               "tripType": i['trip_type'],
+               "payment_status": i['payment_status'],
+               "vehicle": list(vehicles.find({"vehicle_type": vehicle_type, "status": "active", "zone_id": zone.find_one({"zone_name": zones.upper()})['_id']})),
+               "Driver":list(driver.find({"status": "", "zone.zone_name": zones.upper()})),
+               "status": i['status'],
+               "car_type": i['car_type'],
+               "travel_date": i['travel_date']
+            }
+        )
+    # print(f)
+    return json.loads(json_util.dumps(f))
+    
+
 @app.route('/getDrivers')
 def getDrivers():
     drivers = db['Driver']
@@ -249,6 +292,48 @@ def getDrivers():
     
     
     return json.loads(json_util.dumps(driver_list))
+
+
+@app.route('/startTrip', methods=["POST"])
+def startTrip():
+    incoming_msg = request.get_json()
+    driver = db['Driver']
+
+    vehicle = db['Vehicles']
+    cartype = db['Bookings'].find_one({"_id": ObjectId(incoming_msg['bookingId'])})
+    print(incoming_msg['bookingId'])
+    vehicle.update_one({
+        "vehicle_type": cartype['car_type'], "vehicle_name": incoming_msg['vehicleName'], "brand": incoming_msg['brand']
+    }, {
+        '$set': {
+            "status":"assigned"
+        }
+    })
+    payload = {
+        "bookingId": ObjectId(incoming_msg["bookingId"]),
+        "travel_Date": incoming_msg['travelDate']
+    }
+    driver.update_one({
+        "firstname": incoming_msg['driverFirstName'], "lastname": incoming_msg['driverLastName']
+    }, {"$set": {
+        "status": "assigned",
+        "trips": payload,
+    }
+    })
+    db['Bookings'].update_one({
+        "_id": ObjectId(incoming_msg['bookingId'])
+    }, {
+        "$set": {
+            "status": "trip confirmed",
+            "trips": payload
+        }
+
+    })
+
+    return "Booked....."
+
+
+
 
 @app.route('/createDriver', methods=["POST"])
 def createDriver():
@@ -443,25 +528,20 @@ def createVehicle():
     incoming_msg = request.get_json()["Body"];
     vehicles = db['Vehicles']
     zone = db["Zone"].find_one({"zone_name": incoming_msg["zone"]})
-    driver = db['Driver'].find_one({"firstname": incoming_msg["driverId"]})
     checkRegisterNumber = vehicles.find_one({"registration_number": incoming_msg["registerNumber"]})
     vehicle_dict = {
         "zone_id": zone['_id'],
         "vehicle_name": incoming_msg["vehicleName"],
-        "vehicle_model": incoming_msg["vehicleModel"],
         "vehicle_type": incoming_msg["vehicleType"],
         "brand": incoming_msg["brand"],
         "capacity": incoming_msg["capacity"],
         "mileage": incoming_msg["mileage"],
         'zone': zone,
         "vehicle_owner": incoming_msg["ownerType"],
-        "cost_per_km_one_way": incoming_msg["costPerKmOneWay"],
-        "cost_per_km": incoming_msg["costPerKm"],
-        "driver_id": driver['_id'],
         "added_by" :incoming_msg["addedBy"],
         "registration_number":incoming_msg["registerNumber"],
         "vehicle_calender_availability": "",
-        "status": "",
+        "status": "active",
         "rc_certificate": incoming_msg['rcCertificateUrl'],
         "premit_certificate": incoming_msg["permitCertificateUrl"],
         "fitness_certificate": incoming_msg["fitnessCertificateUrl"],
@@ -486,19 +566,21 @@ def getPrice():
     destination = incoming_msg['destination']
     tripType = incoming_msg['trip_type']
     userFirstName = incoming_msg['user_id']
-    zoneName = incoming_msg['origin_zone'].split(',')[0]
+    zoneName = incoming_msg['origin_zone']
     zone = db['Zone']
     user = db['Customer'].find_one({"firstname": userFirstName})
 
     my_dist = gmaps.distance_matrix(origin,destination)['rows'][0]['elements'][0]
     distance = my_dist['distance']['text'].split(' ')[0]
+    clearDistance = distance.replace(',', '') if ',' in distance else distance
+    
     durationHours = my_dist['duration']['text'].split(' ')[0] if tripType == 'oneWay' else incoming_msg['trip_duration'].split(' ')[0]
     durationMinutes = my_dist['duration']['text'].split(' ')[2] if tripType == 'oneWay' else incoming_msg['trip_duration'].split(' ')[2]
     allDuration = int(durationHours) if int(durationMinutes) == 0 else int(durationHours) + 1
     
-    # print(distance, allDuration)
+    # print(clearDistance)
     if user:
-        price = calculateOneWayPricing(zoneName, int(distance), allDuration, tripType)
+        price = calculateOneWayPricing(zoneName, int(clearDistance), allDuration, tripType)
         
         payload = {
          'originZone': zoneName,
@@ -519,12 +601,12 @@ def getPrice():
         return payload
 
     else:
-        price = calculateOneWayPricing(zoneName, int(distance), allDuration, tripType)
+        price = calculateOneWayPricing(zoneName, int(clearDistance), allDuration, tripType)
         payload = {
          'originZone': zoneName,
         'toLocation': destination,
         'duration': allDuration,
-        'distance': int(distance),
+        'distance': distance,
         "price": price
 
     }
@@ -539,8 +621,9 @@ def getPrice():
 
 def calculateOneWayPricing(nameZone, distance, duration, trip):
     zone = db["Zone"]
-    
-    zoneName = zone.find_one({'zone_name':nameZone.upper() })
+    name = nameZone.upper()
+    zoneName = zone.find_one({'zone_name':name})
+    # print(zoneName)
     vehicles = db['Vehicles'].find({"zone_id": zoneName['_id']})
     # print(list(vehicles))
     # pricePerKM = zoneName['price_per_km']
@@ -551,6 +634,7 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
         'Hatchback': '',
         'Sedan': ''
     }
+    # print(distance, type(distance))
     cars = []
     for i in list(vehicles):
         # print(i['vehicle_type'])
@@ -564,6 +648,7 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
                 # print( type(j['from']), type(j['to']))
                 r = range(int(j['from']), int(j['to']))
                 if duration in r:
+                    # print(int(zoneName[i]['price_per_km']))
                     price[i] = (int(j['price']) * duration) + (int(zoneName[i]['price_per_km']) * distance)
     elif trip == 'roundTrip':
         for i in cars:
