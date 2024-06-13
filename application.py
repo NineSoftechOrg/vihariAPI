@@ -10,6 +10,9 @@ import os
 import razorpay
 import certifi
 import googlemaps
+import jwt
+
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 
 
 
@@ -25,6 +28,13 @@ load_dotenv()
 
 app = Flask(__name__)
 
+SECRET_KEY = os.environ.get('SECRET_KEY') or 'Bamsi'
+
+app.config['SECRET_KEY'] = SECRET_KEY
+app.config["JWT_SECRET_KEY"] = 'bamsi'
+app.config['JWT_TOKEN_LOCATION'] = ['headers']
+
+jwt = JWTManager(app)
 
 
 client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", tlsCAFile=ca)
@@ -32,8 +42,10 @@ client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.ne
 db = client["vihari"]
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+
 @app.route('/')
 def start():
+    # print(currentUser)
     return "Vihari api is working....."
 
 
@@ -56,11 +68,12 @@ def order():
 
 
 @app.route('/createZone', methods=["POST"])
+@jwt_required()
 def zone():
     incoming_msg = request.get_json();
     zone = db['Zone']
     admin = db["Admins"]
-    driver = list(db["Driver"].find({"firstname": "Driver" }))
+    user_id = get_jwt_identity()
     zone_check = zone.find_one({"zone_name": incoming_msg["zoneName"].upper()})
     
     if zone_check:
@@ -68,13 +81,13 @@ def zone():
     else:
         zone_dict = {
             "zone_name": incoming_msg['zoneName'].upper(),
-            "added_by": "Admin",
+            "added_by": admin.find_one({"_id": ObjectId(user_id)})["role"],
             "geofence_radius": incoming_msg['geofence'],
             "price_matrix": [],
             "total_vehicles": [],
             'hourly_price': [],
             'hourly_price_round':[],
-            "total_drivers": driver,
+            "total_drivers": "",
             "status": "active"
         }
 
@@ -86,6 +99,7 @@ def zone():
     
 
 @app.route('/setPriceZone', methods=["POST"])
+@jwt_required()
 def pricing():
     incoming_msg = request.get_json();
     zone = db['Zone'];
@@ -177,6 +191,7 @@ def setBooking():
 
 
 @app.route('/getBookings')
+@jwt_required()
 def getBookings():
     bookins = db['Bookings']
     all = list(bookins.find())
@@ -184,6 +199,7 @@ def getBookings():
 
 
 @app.route('/getZones')
+@jwt_required()
 def getzones():
     zones = db['Zone']
     
@@ -204,6 +220,7 @@ def getzones():
 
 
 @app.route('/getVendors')
+@jwt_required()
 def getvendors():
     vendors = db['Vendors']
     
@@ -224,6 +241,7 @@ def getvendors():
 
 
 @app.route('/getVehicles')
+@jwt_required()
 def getVehicles():
     vehicles = db['Vehicles']
     
@@ -233,6 +251,7 @@ def getVehicles():
     return json.loads(json_util.dumps(vehicles_list))
 
 @app.route('/getZoneAdmins')
+@jwt_required()
 def getZoneAdmins():
     zoneAdmins = db['ZoneAdmins']
     
@@ -242,6 +261,7 @@ def getZoneAdmins():
     return json.loads(json_util.dumps(zoneadmin_list))
 
 @app.route('/trips')
+@jwt_required()
 def trips():
     bookings = db['Bookings']
     vehicles = db["Vehicles"]
@@ -275,6 +295,7 @@ def trips():
     
 
 @app.route('/getDrivers')
+@jwt_required()
 def getDrivers():
     drivers = db['Driver']
     
@@ -311,21 +332,23 @@ def startTrip():
     })
     payload = {
         "bookingId": ObjectId(incoming_msg["bookingId"]),
-        "travel_Date": incoming_msg['travelDate']
+        "travel_Date": incoming_msg['travelDate'],
+        "trip_status": ""
     }
     driver.update_one({
         "firstname": incoming_msg['driverFirstName'], "lastname": incoming_msg['driverLastName']
     }, {"$set": {
         "status": "assigned",
-        "trips": payload,
-    }
+    }, 
+        "$push": {
+            "trips": payload,
+        }
     })
     db['Bookings'].update_one({
         "_id": ObjectId(incoming_msg['bookingId'])
     }, {
         "$set": {
-            "status": "trip confirmed",
-            "trips": payload
+            "status": "trip confirmed"
         }
 
     })
@@ -336,7 +359,8 @@ def startTrip():
 
 
 @app.route('/createDriver', methods=["POST"])
-def createDriver():
+@jwt_required()
+def createDriver(currentUser):
     incoming_msg = request.get_json()["Body"];
     drivers = db["Driver"]
     zone = db["Zone"]
@@ -360,7 +384,9 @@ def createDriver():
             "id_proof_front_url": incoming_msg["imgUrl"],
             "address_proof_url": incoming_msg["addressProof"],
             "pan_card": incoming_msg["pan"],
-            "calender_availability": ""
+            "status": "",
+            "trips": []
+
         }
         drivers.insert_one(driver_dict)
 
@@ -430,6 +456,7 @@ def checkCustomer():
     admin = db['Admins']
     zoneAdmin = db['ZoneAdmins']
     vendor = db['Vendors']
+    onlyDriver = db['Driver'].find_one({"mobile": incoming_msg["phoneNumber"]})
     customer = customers.find_one({"mobile": incoming_msg["phoneNumber"]})
     onlyAdmin = admin.find_one({"contact": incoming_msg['phoneNumber']})
     onlyZoneAdmin = zoneAdmin.find_one({"mobile": incoming_msg['phoneNumber']})
@@ -439,11 +466,43 @@ def checkCustomer():
     if customer:
         return json.loads(json_util.dumps(customer))
     elif onlyAdmin:
-        return json.loads(json_util.dumps(onlyAdmin))
+        tokenAdmin = create_access_token(identity=str(onlyAdmin['_id']))
+        admin.update_one(onlyAdmin, {
+            "$set": {
+                "token": tokenAdmin
+            }
+        })
+        # print(onlyAdmin['_id'])
+        return {
+            "admin": json.loads(json_util.dumps(onlyAdmin)),
+            "token":tokenAdmin
+        } 
     elif onlyZoneAdmin:
-        return json.loads(json_util.dumps(onlyZoneAdmin))
+        tokenzoneAdmin = create_access_token(identity=str(onlyZoneAdmin['_id']))
+        zoneAdmin.update_one(onlyZoneAdmin, {
+            "$set": {
+                "token": tokenzoneAdmin
+            }
+        })
+        return {
+            "zoneAdmin": json.loads(json_util.dumps(onlyZoneAdmin)),
+            "token": tokenzoneAdmin
+        }
     elif onlyVendors:
+        jwt.encode()
         return json.loads(json_util.dumps(onlyVendors))
+    elif onlyDriver:
+        token = create_access_token(identity=str(onlyDriver['_id']))
+        db['Driver'].update_one(onlyDriver, {
+            "$set": {
+                "token": token
+                # "token": jwt({"user_id": str(onlyDriver["_id"])}, "driver", )
+            }
+        })
+        return {
+            "driver": json.loads(json_util.dumps(onlyDriver)),
+            "token": token
+        }
     else:
         return "You are not registered, please register first", 400
 
@@ -452,6 +511,7 @@ def checkCustomer():
 
 
 @app.route('/createVendor', methods=["POST"])
+@jwt_required()
 def createVendor():
     incoming_msg = request.get_json()["Body"];
     vendors = db['Vendors']
@@ -488,6 +548,7 @@ def createVendor():
         return "working....."
 
 @app.route('/createZoneAdmin', methods=["POST"])
+@jwt_required()
 def createZoneAdmin():
     incoming_msg = request.get_json()["Body"];
     zone_admins = db['ZoneAdmins']
@@ -524,6 +585,7 @@ def createZoneAdmin():
         return "working....."
 
 @app.route('/createVehicle', methods=["POST"])
+@jwt_required()
 def createVehicle():
     incoming_msg = request.get_json()["Body"];
     vehicles = db['Vehicles']
@@ -557,6 +619,33 @@ def createVehicle():
     vehicles.insert_one(vehicle_dict)
     # print(driver['_id'])
     return "working....."
+
+
+
+
+
+@app.route('/fetchTrips', methods=["GET"])
+@jwt_required()
+def fetchTrips():
+    user_id = get_jwt_identity()
+    # user = User.query.filter_by(id=user_id).first()
+    trips = db['Driver'].find_one({'_id': ObjectId(user_id)})["trips"]
+    # Check if user exists
+    return json.loads(json_util.dumps(trips)), 200
+
+
+@app.route('/updateTripStatus')
+@jwt_required()
+def updateTripStatus():
+    # user_id = get_jwt_identity()
+    incoming_msg = request.get_json()
+    bookingId = incoming_msg['bookingId']
+    
+    db['Driver'].update_many({
+        "trips.bookingId": ObjectId(bookingId)
+    }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+
+    return "working...."
 
 @app.route('/getPrice', methods=['POST'])
 def getPrice():
