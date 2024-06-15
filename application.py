@@ -13,8 +13,8 @@ import googlemaps
 import jwt
 
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-
-
+from functools import wraps
+import datetime
 
 ca = certifi.where()
 
@@ -27,20 +27,47 @@ gmaps = googlemaps.Client(key='AIzaSyAL9K2tfUIeuX0SkO2EZ4Ig55gbtPeZs-c')
 load_dotenv()
 
 app = Flask(__name__)
-
-SECRET_KEY = os.environ.get('SECRET_KEY') or 'Bamsi'
-
-app.config['SECRET_KEY'] = SECRET_KEY
+app.config['SECRET_KEY'] = 'bamsi'
 app.config["JWT_SECRET_KEY"] = 'bamsi'
 app.config['JWT_TOKEN_LOCATION'] = ['headers']
 
-jwt = JWTManager(app)
+
+
 
 
 client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", tlsCAFile=ca)
 
 db = client["vihari"]
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+
+def getCurrentUser(id):
+    admin = db["Admins"].find_one({"_id": ObjectId(id)})
+    zoneAdmin = db['ZoneAdmins'].find_one({"_id": ObjectId(id)})
+    driver = db['Driver'].find_one({"_id": ObjectId(id)})
+
+    return admin or driver or zoneAdmin
+
+def token_required(f):
+   @wraps(f)
+   def decorator(*args, **kwargs):
+       token = None
+       if 'Authorization' in request.headers:
+           token = request.headers['Authorization']
+ 
+       if not token:
+           return jsonify({'message': 'a valid token is missing'})
+       try:
+           data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+           current_user = getCurrentUser(data['user_id'])
+       except:
+           return jsonify({'message': 'token is invalid'})
+ 
+       return f(current_user, *args, **kwargs)
+   return decorator
+
+
+
 
 
 @app.route('/')
@@ -68,8 +95,8 @@ def order():
 
 
 @app.route('/createZone', methods=["POST"])
-@jwt_required()
-def zone():
+@token_required
+def zone(currentUser):
     incoming_msg = request.get_json();
     zone = db['Zone']
     admin = db["Admins"]
@@ -99,8 +126,8 @@ def zone():
     
 
 @app.route('/setPriceZone', methods=["POST"])
-@jwt_required()
-def pricing():
+@token_required
+def pricing(currentUser):
     incoming_msg = request.get_json();
     zone = db['Zone'];
     vehicleType = incoming_msg['zoneName']['vehicleType'] if incoming_msg['trip'] == 'oneWay' else incoming_msg['vehicleType']
@@ -191,16 +218,16 @@ def setBooking():
 
 
 @app.route('/getBookings')
-@jwt_required()
-def getBookings():
+@token_required
+def getBookings(current):
     bookins = db['Bookings']
     all = list(bookins.find())
     return json.loads(json_util.dumps(all))
 
 
 @app.route('/getZones')
-@jwt_required()
-def getzones():
+@token_required
+def getzones(currentUser):
     zones = db['Zone']
     
     zone = zones.find()
@@ -220,8 +247,8 @@ def getzones():
 
 
 @app.route('/getVendors')
-@jwt_required()
-def getvendors():
+@token_required
+def getvendors(current):
     vendors = db['Vendors']
     
     vendor = vendors.find()
@@ -241,8 +268,8 @@ def getvendors():
 
 
 @app.route('/getVehicles')
-@jwt_required()
-def getVehicles():
+@token_required
+def getVehicles(current):
     vehicles = db['Vehicles']
     
     vehicle = vehicles.find()
@@ -251,8 +278,8 @@ def getVehicles():
     return json.loads(json_util.dumps(vehicles_list))
 
 @app.route('/getZoneAdmins')
-@jwt_required()
-def getZoneAdmins():
+@token_required
+def getZoneAdmins(current):
     zoneAdmins = db['ZoneAdmins']
     
     zoneAdmin = zoneAdmins.find()
@@ -261,8 +288,8 @@ def getZoneAdmins():
     return json.loads(json_util.dumps(zoneadmin_list))
 
 @app.route('/trips')
-@jwt_required()
-def trips():
+@token_required
+def trips(current):
     bookings = db['Bookings']
     vehicles = db["Vehicles"]
     zone = db["Zone"]
@@ -295,8 +322,8 @@ def trips():
     
 
 @app.route('/getDrivers')
-@jwt_required()
-def getDrivers():
+@token_required
+def getDrivers(current):
     drivers = db['Driver']
     
     driver = drivers.find()
@@ -316,7 +343,8 @@ def getDrivers():
 
 
 @app.route('/startTrip', methods=["POST"])
-def startTrip():
+@token_required
+def startTrip(current):
     incoming_msg = request.get_json()
     driver = db['Driver']
 
@@ -359,7 +387,7 @@ def startTrip():
 
 
 @app.route('/createDriver', methods=["POST"])
-@jwt_required()
+@token_required
 def createDriver(currentUser):
     incoming_msg = request.get_json()["Body"];
     drivers = db["Driver"]
@@ -466,7 +494,7 @@ def checkCustomer():
     if customer:
         return json.loads(json_util.dumps(customer))
     elif onlyAdmin:
-        tokenAdmin = create_access_token(identity=str(onlyAdmin['_id']))
+        tokenAdmin = jwt.encode({'user_id' : str(onlyAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         admin.update_one(onlyAdmin, {
             "$set": {
                 "token": tokenAdmin
@@ -478,7 +506,7 @@ def checkCustomer():
             "token":tokenAdmin
         } 
     elif onlyZoneAdmin:
-        tokenzoneAdmin = create_access_token(identity=str(onlyZoneAdmin['_id']))
+        tokenzoneAdmin = jwt.encode({'user_id' : str(onlyZoneAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         zoneAdmin.update_one(onlyZoneAdmin, {
             "$set": {
                 "token": tokenzoneAdmin
@@ -489,10 +517,9 @@ def checkCustomer():
             "token": tokenzoneAdmin
         }
     elif onlyVendors:
-        jwt.encode()
         return json.loads(json_util.dumps(onlyVendors))
     elif onlyDriver:
-        token = create_access_token(identity=str(onlyDriver['_id']))
+        token = jwt.encode({'user_id' : str(onlyDriver['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         db['Driver'].update_one(onlyDriver, {
             "$set": {
                 "token": token
@@ -511,8 +538,8 @@ def checkCustomer():
 
 
 @app.route('/createVendor', methods=["POST"])
-@jwt_required()
-def createVendor():
+@token_required
+def createVendor(current):
     incoming_msg = request.get_json()["Body"];
     vendors = db['Vendors']
     zone = db["Zone"].find_one({"zone_name": incoming_msg["zone"]})
@@ -548,8 +575,8 @@ def createVendor():
         return "working....."
 
 @app.route('/createZoneAdmin', methods=["POST"])
-@jwt_required()
-def createZoneAdmin():
+@token_required
+def createZoneAdmin(current):
     incoming_msg = request.get_json()["Body"];
     zone_admins = db['ZoneAdmins']
     zone = db["Zone"].find_one({"zone_name": incoming_msg["zone"]})
@@ -585,8 +612,8 @@ def createZoneAdmin():
         return "working....."
 
 @app.route('/createVehicle', methods=["POST"])
-@jwt_required()
-def createVehicle():
+@token_required
+def createVehicle(current):
     incoming_msg = request.get_json()["Body"];
     vehicles = db['Vehicles']
     zone = db["Zone"].find_one({"zone_name": incoming_msg["zone"]})
@@ -625,8 +652,8 @@ def createVehicle():
 
 
 @app.route('/fetchTrips', methods=["GET"])
-@jwt_required()
-def fetchTrips():
+@token_required
+def fetchTrips(current):
     user_id = get_jwt_identity()
     # user = User.query.filter_by(id=user_id).first()
     trips = db['Driver'].find_one({'_id': ObjectId(user_id)})["trips"]
@@ -634,10 +661,11 @@ def fetchTrips():
     return json.loads(json_util.dumps(trips)), 200
 
 
-@app.route('/updateTripStatus')
-@jwt_required()
-def updateTripStatus():
-    # user_id = get_jwt_identity()
+@app.route('/updateTripStatus', methods=['POST'])
+@token_required
+def updateTripStatus(currentUser):
+    user_id = currentUser
+    print(user_id)
     incoming_msg = request.get_json()
     bookingId = incoming_msg['bookingId']
     
