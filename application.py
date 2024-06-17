@@ -11,7 +11,7 @@ import razorpay
 import certifi
 import googlemaps
 import jwt
-
+from flask import abort
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from functools import wraps
 import datetime
@@ -27,9 +27,9 @@ gmaps = googlemaps.Client(key='AIzaSyAL9K2tfUIeuX0SkO2EZ4Ig55gbtPeZs-c')
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'bamsi'
-app.config["JWT_SECRET_KEY"] = 'bamsi'
-app.config['JWT_TOKEN_LOCATION'] = ['headers']
+SECRET_KEY = os.environ.get('SECRET_KEY') or 'bamsi'
+print(SECRET_KEY)
+app.config['SECRET_KEY'] = SECRET_KEY
 
 
 
@@ -49,23 +49,37 @@ def getCurrentUser(id):
     return admin or driver or zoneAdmin
 
 def token_required(f):
-   @wraps(f)
-   def decorator(*args, **kwargs):
-       token = None
-       if 'Authorization' in request.headers:
-           token = request.headers['Authorization']
- 
-       if not token:
-           return jsonify({'message': 'a valid token is missing'})
-       try:
-           data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-           current_user = getCurrentUser(data['user_id'])
-       except:
-           return jsonify({'message': 'token is invalid'})
- 
-       return f(current_user, *args, **kwargs)
-   return decorator
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if "Authorization" in request.headers:
+            token = request.headers["Authorization"].split(" ")[1]
+        if not token:
+            return {
+                "message": "Authentication Token is missing!",
+                "data": None,
+                "error": "Unauthorized"
+            }, 401
+        try:
+            data=jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
+            current_user= getCurrentUser(data["user_id"])
+            if current_user is None:
+                return {
+                "message": "Invalid Authentication token!",
+                "data": None,
+                "error": "Unauthorized"
+            }, 401
+            
+        except Exception as e:
+            return {
+                "message": "Something went wrong",
+                "data": None,
+                "error": str(e)
+            }, 500
 
+        return f(current_user, *args, **kwargs)
+
+    return decorated
 
 
 
@@ -396,6 +410,9 @@ def createDriver(currentUser):
     driver_check = drivers.find_one({"mobile": incoming_msg['mobile']})
     customer_check = db['Customer'].find_one({"mobile": incoming_msg['mobile']})
     vendor_check = db['Vendors'].find_one({"mobile": incoming_msg['mobile']})
+    if "Authorization" in request.headers:
+        token = request.headers["Authorization"].split(" ")[1]
+        print(token)
     if driver_check or customer_check or vendor_check:
         return "this number already used", 404
     
