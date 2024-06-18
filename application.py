@@ -11,8 +11,6 @@ import razorpay
 import certifi
 import googlemaps
 import jwt
-from flask import abort
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from functools import wraps
 import datetime
 
@@ -114,7 +112,6 @@ def zone(currentUser):
     incoming_msg = request.get_json();
     zone = db['Zone']
     admin = db["Admins"]
-    user_id = get_jwt_identity()
     zone_check = zone.find_one({"zone_name": incoming_msg["zoneName"].upper()})
     
     if zone_check:
@@ -671,9 +668,8 @@ def createVehicle(current):
 @app.route('/fetchTrips', methods=["GET"])
 @token_required
 def fetchTrips(current):
-    user_id = get_jwt_identity()
     # user = User.query.filter_by(id=user_id).first()
-    trips = db['Driver'].find_one({'_id': ObjectId(user_id)})["trips"]
+    trips = db['Driver'].find_one({'_id': ObjectId(current)})["trips"]
     # Check if user exists
     return json.loads(json_util.dumps(trips)), 200
 
