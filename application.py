@@ -44,7 +44,7 @@ def getCurrentUser(id):
     zoneAdmin = db['ZoneAdmins'].find_one({"_id": ObjectId(id)})
     driver = db['Driver'].find_one({"_id": ObjectId(id)})
 
-    return admin or driver or zoneAdmin
+    return admin['_id'] or driver['_id'] or zoneAdmin['_id']
 
 def token_required(f):
     @wraps(f)
@@ -119,7 +119,7 @@ def zone(currentUser):
     else:
         zone_dict = {
             "zone_name": incoming_msg['zoneName'].upper(),
-            "added_by": admin.find_one({"_id": ObjectId(user_id)})["role"],
+            "added_by": admin.find_one({"_id": ObjectId(currentUser)})["role"],
             "geofence_radius": incoming_msg['geofence'],
             "price_matrix": [],
             "total_vehicles": [],
@@ -287,6 +287,29 @@ def getVehicles(current):
     vehicles_list = list(vehicle)
     
     return json.loads(json_util.dumps(vehicles_list))
+
+
+@app.route('/getUsers')
+@token_required
+def getUsers(current):
+    users = db['Customer']
+    
+    user = users.find()
+    users_list = list(user)
+    
+    return json.loads(json_util.dumps(users_list))
+
+@app.route('/getUser', methods=["POST"])
+@token_required
+def getUser(current):
+    incoming_msg = request.get_json()
+    users = db['Customer']
+    
+    user = users.find_one({"_id": ObjectId(incoming_msg['userId'])})
+    users_list = list(user)
+    
+    return json.loads(json_util.dumps(users_list))
+
 
 @app.route('/getZoneAdmins')
 @token_required
