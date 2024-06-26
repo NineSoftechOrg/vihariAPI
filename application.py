@@ -43,8 +43,13 @@ def getCurrentUser(id):
     admin = db["Admins"].find_one({"_id": ObjectId(id)})
     zoneAdmin = db['ZoneAdmins'].find_one({"_id": ObjectId(id)})
     driver = db['Driver'].find_one({"_id": ObjectId(id)})
+    if admin:
+        return admin['_id']
+    elif zoneAdmin:
+        return zoneAdmin['_id']
+    elif driver:
+        return driver['_id']
 
-    return admin['_id'] or driver['_id'] or zoneAdmin['_id']
 
 def token_required(f):
     @wraps(f)
@@ -61,6 +66,7 @@ def token_required(f):
         try:
             data=jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
             current_user= getCurrentUser(data["user_id"])
+            # print(current_user)
             if current_user is None:
                 return {
                 "message": "Invalid Authentication token!",
@@ -240,7 +246,7 @@ def getBookings(current):
 @token_required
 def getzones(currentUser):
     zones = db['Zone']
-    
+    print(currentUser)
     zone = zones.find()
     zone_list = list(zone)
     # for items in zone:
@@ -543,29 +549,29 @@ def checkCustomer():
             "token":tokenAdmin
         } 
     elif onlyZoneAdmin:
-        tokenzoneAdmin = jwt.encode({'user_id' : str(onlyZoneAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
+        tokenAdmin = jwt.encode({'user_id' : str(onlyZoneAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         zoneAdmin.update_one(onlyZoneAdmin, {
             "$set": {
-                "token": tokenzoneAdmin
+                "token": tokenAdmin
             }
         })
         return {
             "zoneAdmin": json.loads(json_util.dumps(onlyZoneAdmin)),
-            "token": tokenzoneAdmin
+            "token": tokenAdmin
         }
     elif onlyVendors:
         return json.loads(json_util.dumps(onlyVendors))
     elif onlyDriver:
-        token = jwt.encode({'user_id' : str(onlyDriver['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
+        tokenAdmin = jwt.encode({'user_id' : str(onlyDriver['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         db['Driver'].update_one(onlyDriver, {
             "$set": {
-                "token": token
+                "token": tokenAdmin
                 # "token": jwt({"user_id": str(onlyDriver["_id"])}, "driver", )
             }
         })
         return {
             "driver": json.loads(json_util.dumps(onlyDriver)),
-            "token": token
+            "token": tokenAdmin
         }
     else:
         return "You are not registered, please register first", 400
@@ -719,7 +725,7 @@ def getPrice():
     destination = incoming_msg['destination']
     tripType = incoming_msg['trip_type']
     userFirstName = incoming_msg['user_id']
-    zoneName = incoming_msg['origin_zone']
+    zoneName = incoming_msg['origin_zone'].upper()
     zone = db['Zone']
     user = db['Customer'].find_one({"firstname": userFirstName})
 
@@ -774,19 +780,14 @@ def getPrice():
 
 def calculateOneWayPricing(nameZone, distance, duration, trip):
     zone = db["Zone"]
-    name = nameZone.upper()
-    zoneName = zone.find_one({'zone_name':name})
-    # print(zoneName)
+    # name = nameZone.upper()
+    zoneName = zone.find_one({'zone_name':nameZone})
+    print(nameZone)
     vehicles = db['Vehicles'].find({"zone_id": zoneName['_id']})
     # print(list(vehicles))
     # pricePerKM = zoneName['price_per_km']
     # priceperKmRoundTrip = zoneName['price_perkm_round']
-    price = {
-        'SUV': '',
-        'MUV': '',
-        'Hatchback': '',
-        'Sedan': ''
-    }
+    
     # print(distance, type(distance))
     cars = []
     for i in list(vehicles):
@@ -795,14 +796,18 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
     # type = cars.find_one({"vehicle_type": car})
     # cars = ['SUV', 'MUV', 'Hatchback', 'Sedan']
     print(cars)
+    price = {
+    }
+    print(price)
     if trip == 'oneWay':
         for i in cars:
-            for j in zoneName[i]['hourly_price']:
-                # print( type(j['from']), type(j['to']))
-                r = range(int(j['from']), int(j['to']))
-                if duration in r:
-                    # print(int(zoneName[i]['price_per_km']))
-                    price[i] = (int(j['price']) * duration) + (int(zoneName[i]['price_per_km']) * distance)
+            if i in zoneName.keys():
+                for j in zoneName[i]['hourly_price']:
+                    # print( type(j['from']), type(j['to']))
+                    r = range(int(j['from']), int(j['to']))
+                    if duration in r:
+                        # print(int(zoneName[i]['price_per_km']))
+                        price[i] = (int(j['price']) * duration) + (int(zoneName[i]['price_per_km']) * distance)
     elif trip == 'roundTrip':
         for i in cars:
             for j in zoneName[i + "_round"]['hourly_price_round']:
