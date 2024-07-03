@@ -138,8 +138,7 @@ def zone(currentUser):
 
         zone.insert_one(zone_dict)
         return "working....", 200
-    # print(driver)
-    # print(driver.find())
+    
     
     
 
@@ -187,12 +186,10 @@ def setBooking():
         bookings = db['Bookings']
         vehicles = db['Vehicles']
         zone = db["Zone"].find_one({'zone_name': incoming_msg['from'].upper()})
-        # print(incoming_msg['car_model'])
         capacity = vehicles.find_one({"vehicle_type": incoming_msg['car_model'], "zone_id": zone['_id']})
         
         print(capacity)
         carZone = db['Zone'].find_one({"_id": capacity['zone_id']})
-        # print(capacity)
         
         payload = {
             "orginZone": incoming_msg['from'],
@@ -209,6 +206,7 @@ def setBooking():
             'car_type': incoming_msg['car_model'],
             'car_zone': carZone['zone_name'],
             'car_info': '',
+            'car_registration_number': capacity['registration_number'],
             'booking_price': '',
             'payment_status': 'Paid' if incoming_msg['payment_type'] != "COD" else "PENDING",
             'payment_type': incoming_msg['payment_type'],
@@ -250,17 +248,6 @@ def getzones(currentUser):
     print(currentUser)
     zone = zones.find()
     zone_list = list(zone)
-    # for items in zone:
-    #     zone_dict = {
-    #         "zone_name": items["zone_name"],
-    #         "geofence_radius": items["geofence_radius"],
-    #         "price_matrix": items["price_matrix"],
-    #         "total_vehicles": items["total_vehicles"],
-    #         "total_drivers": items["total_drivers"]
-    #     }
-    # zone_list.append(zone_dict)
-    
-    
     return json.loads(json_util.dumps(zone_list))
 
 
@@ -271,17 +258,6 @@ def getvendors(current):
     
     vendor = vendors.find()
     vendor_list = list(vendor)
-    # for items in zone:
-    #     zone_dict = {
-    #         "zone_name": items["zone_name"],
-    #         "geofence_radius": items["geofence_radius"],
-    #         "price_matrix": items["price_matrix"],
-    #         "total_vehicles": items["total_vehicles"],
-    #         "total_drivers": items["total_drivers"]
-    #     }
-    # zone_list.append(zone_dict)
-    
-    
     return json.loads(json_util.dumps(vendor_list))
 
 
@@ -335,11 +311,8 @@ def trips(current):
     vehicles = db["Vehicles"]
     zone = db["Zone"]
     driver = db['Driver']
-    # print(list(driver))
     all = list(bookings.find())
     f = []
-    
-    # print(vehicle)
     for i in all:
         zones = i['orginZone']
         vehicle_type = i['car_type']
@@ -701,14 +674,15 @@ def updateTable(current):
     incoming_msg = request.get_json()["Body"];
     updateType = incoming_msg['type'][0];
     whereToDeleteOrUpdate = incoming_msg['type'][1]
-    updateData = incoming_msg['data'][0]
+    updateData = incoming_msg['data']
+    print(updateData)
     userId = incoming_msg['userId']
     if updateType == 'Delete':
         db[whereToDeleteOrUpdate].delete_one({"_id": ObjectId(userId)})
     elif updateType == 'Update':
         db[whereToDeleteOrUpdate].update_one({"_id": ObjectId(userId)}, {
             "$set": {
-                updateData: incoming_msg['data'][1]
+                **updateData
             }
         })
     return "Working..."
@@ -717,9 +691,7 @@ def updateTable(current):
 @app.route('/fetchTrips', methods=["GET"])
 @token_required
 def fetchTrips(current):
-    # user = User.query.filter_by(id=user_id).first()
     trips = db['Driver'].find_one({'_id': ObjectId(current)})["trips"]
-    # Check if user exists
     return json.loads(json_util.dumps(trips)), 200
 
 
@@ -739,7 +711,6 @@ def updateTripStatus(current):
     elif incoming_msg['status'] == 'Trip Ended':
         userId = incoming_msg['userId'] if incoming_msg['userId'] else ''
         otpUser = db['Customer'].find_one({"_id": ObjectId(userId)})['otp']
-        print(otpUser)
         otp = incoming_msg['otp'] if incoming_msg['otp'] else ''
         if otp == otpUser:
             regNumberVehicle = incoming_msg['regNum'] if incoming_msg['regNum'] else ''
@@ -765,7 +736,6 @@ def updateTripStatus(current):
 @app.route('/getPrice', methods=['POST'])
 def getPrice():
     incoming_msg = request.get_json()["Body"];
-    # print(type(durationMinutes))
     origin = incoming_msg['origin_zone']
     destination = incoming_msg['destination']
     tripType = incoming_msg['trip_type']
@@ -817,23 +787,16 @@ def getPrice():
     
     
 
-    # print(zoneName)
-
-    # print()
-    # return price
 
 def calculateOneWayPricing(nameZone, distance, duration, trip):
     zone = db["Zone"]
     # name = nameZone.upper()
     zoneName = zone.find_one({'zone_name':nameZone})
-    print(nameZone)
     vehicles = db['Vehicles'].find({"zone_id": zoneName['_id']})
     cars = []
     for i in list(vehicles):
         # print(i['vehicle_type'])
         cars.append(i['vehicle_type'])
-    # type = cars.find_one({"vehicle_type": car})
-    # cars = ['SUV', 'MUV', 'Hatchback', 'Sedan']
     print(cars)
     global farePrice
     if duration in range(0,24):
