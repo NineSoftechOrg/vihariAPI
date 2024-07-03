@@ -13,6 +13,7 @@ import googlemaps
 import jwt
 from functools import wraps
 import datetime
+import random
 
 ca = certifi.where()
 
@@ -312,7 +313,7 @@ def getUser(current):
     users = db['Customer']
     
     user = users.find_one({"_id": ObjectId(incoming_msg['userId'])})
-    users_list = list(user)
+    users_list = user
     
     return json.loads(json_util.dumps(users_list))
 
@@ -351,7 +352,7 @@ def trips(current):
                "tripType": i['trip_type'],
                "payment_status": i['payment_status'],
                "vehicle": list(vehicles.find({"vehicle_type": vehicle_type, "status": "active", "zone_id": zone.find_one({"zone_name": zones.upper()})['_id']})),
-               "Driver":list(driver.find({"status": "", "zone.zone_name": zones.upper()})),
+               "Driver":list(driver.find({"status": "active", "zone.zone_name": zones.upper()})),
                "status": i['status'],
                "car_type": i['car_type'],
                "travel_date": i['travel_date']
@@ -455,7 +456,7 @@ def createDriver(currentUser):
             "id_proof_front_url": incoming_msg["imgUrl"],
             "address_proof_url": incoming_msg["addressProof"],
             "pan_card": incoming_msg["pan"],
-            "status": "",
+            "status": "active",
             "trips": []
 
         }
@@ -471,9 +472,9 @@ def createAdmin():
     zones = db["Zone"]
     zoneAdmin = zones.find_one({"zone_admin.name": "Bamsi"})
     admin_dict = {
-        "firstname": "Mr",
-        "lastName": "Ramarao",
-        "contact": "+919493555253",
+        "firstname": "Admin",
+        "lastName": "|Admin",
+        "contact": "+918106666295",
         "email": "",
         "license_number": "",
         "role": 'admin'
@@ -492,6 +493,7 @@ def createCustomer():
     driver_check = drivers.find_one({"mobile": incoming_msg['phoneNumber']})
     customer_check = db['Customer'].find_one({"mobile": incoming_msg['phoneNumber']})
     vendor_check = db['Vendors'].find_one({"mobile": incoming_msg['phoneNumber']})
+    number = random.randint(1000,9999)
     if driver_check or customer_check or vendor_check or email:
         return "this number already used or email", 404
 
@@ -512,7 +514,8 @@ def createCustomer():
             "feedback": [],
             "status": "",
             "profile_url": "",
-            'role': "user"
+            'role': "user",
+            "otp": number
         }
 
         customer.insert_one(customer_dict)
@@ -622,7 +625,8 @@ def createVendor(current):
 def createZoneAdmin(current):
     incoming_msg = request.get_json()["Body"];
     zone_admins = db['ZoneAdmins']
-    zone = db["Zone"].find_one({"zone_name": incoming_msg["zone"]})
+    zoneName = incoming_msg['zone'].upper()
+    zone = db["Zone"].find_one({"zone_name": zoneName})
     drivers = db['Driver']
     driver_check = drivers.find_one({"mobile": incoming_msg['mobile']})
     customer_check = db['Customer'].find_one({"mobile": incoming_msg['mobile']})
@@ -659,7 +663,7 @@ def createZoneAdmin(current):
 def createVehicle(current):
     incoming_msg = request.get_json()["Body"];
     vehicles = db['Vehicles']
-    zone = db["Zone"].find_one({"zone_name": incoming_msg["zone"]})
+    zone = db["Zone"].find_one({"_id": ObjectId(incoming_msg["zone"])})
     checkRegisterNumber = vehicles.find_one({"registration_number": incoming_msg["registerNumber"]})
     vehicle_dict = {
         "zone_id": zone['_id'],
@@ -691,7 +695,23 @@ def createVehicle(current):
     return "working....."
 
 
-
+@app.route('/update', methods=['POST'])
+@token_required
+def updateTable(current):
+    incoming_msg = request.get_json()["Body"];
+    updateType = incoming_msg['type'][0];
+    whereToDeleteOrUpdate = incoming_msg['type'][1]
+    updateData = incoming_msg['data'][0]
+    userId = incoming_msg['userId']
+    if updateType == 'Delete':
+        db[whereToDeleteOrUpdate].delete_one({"_id": ObjectId(userId)})
+    elif updateType == 'Update':
+        db[whereToDeleteOrUpdate].update_one({"_id": ObjectId(userId)}, {
+            "$set": {
+                updateData: incoming_msg['data'][1]
+            }
+        })
+    return "Working..."
 
 
 @app.route('/fetchTrips', methods=["GET"])
@@ -705,17 +725,42 @@ def fetchTrips(current):
 
 @app.route('/updateTripStatus', methods=['POST'])
 @token_required
-def updateTripStatus(currentUser):
-    user_id = currentUser
-    print(user_id)
+def updateTripStatus(current):
     incoming_msg = request.get_json()
     bookingId = incoming_msg['bookingId']
+    if incoming_msg['status'] == 'Trip Started':
+        db['Bookings'].update_one({
+            '_id': ObjectId(bookingId)
+        }, {
+            "$set": {"status": incoming_msg['status']}
+        })
+        return "Updated to Trip started"
     
-    db['Driver'].update_many({
-        "trips.bookingId": ObjectId(bookingId)
-    }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+    elif incoming_msg['status'] == 'Trip Ended':
+        userId = incoming_msg['userId'] if incoming_msg['userId'] else ''
+        otpUser = db['Customer'].find_one({"_id": ObjectId(userId)})['otp']
+        print(otpUser)
+        otp = incoming_msg['otp'] if incoming_msg['otp'] else ''
+        if otp == otpUser:
+            regNumberVehicle = incoming_msg['regNum'] if incoming_msg['regNum'] else ''
+            driverId = incoming_msg['driverId'] if incoming_msg['driverId'] else ''
+            db['Vehicles'].update_one({
+                'registration_number': regNumberVehicle
+            }, {
+                "$set": {"status": "active"}
+            })
+            db['Driver'].update_one({
+                '_id': ObjectId(driverId)
+            }, {
+                "$set": {"status": "active"}
+            })
+            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                 "$set": {"status": incoming_msg['status']}
+            })
+            return "updated"
+        
+    return "otp not valid", 500
 
-    return "working...."
 
 @app.route('/getPrice', methods=['POST'])
 def getPrice():
@@ -730,22 +775,21 @@ def getPrice():
     user = db['Customer'].find_one({"firstname": userFirstName})
 
     my_dist = gmaps.distance_matrix(origin,destination)['rows'][0]['elements'][0]
-    distance = my_dist['distance']['text'].split(' ')[0]
-    clearDistance = distance.replace(',', '') if ',' in distance else distance
-    
+    distance = my_dist['distance']['text'].split(' ')[0].replace(',', '')
+    twoWayDistancecal = gmaps.distance_matrix(destination,origin)['rows'][0]['elements'][0]
+    twoWayDistance = twoWayDistancecal['distance']['text'].split(' ')[0].replace(',', '')
     durationHours = my_dist['duration']['text'].split(' ')[0] if tripType == 'oneWay' else incoming_msg['trip_duration'].split(' ')[0]
     durationMinutes = my_dist['duration']['text'].split(' ')[2] if tripType == 'oneWay' else incoming_msg['trip_duration'].split(' ')[2]
     allDuration = int(durationHours) if int(durationMinutes) == 0 else int(durationHours) + 1
     
-    # print(clearDistance)
     if user:
-        price = calculateOneWayPricing(zoneName, int(clearDistance), allDuration, tripType)
+        price = calculateOneWayPricing(zoneName, int(float(distance)), allDuration, tripType)
         
         payload = {
-         'originZone': zoneName,
+        'originZone': zoneName,
         'toLocation': destination,
         'duration': allDuration,
-        'distance': int(distance),
+        'distance': int(float(distance)) if tripType == 'oneWay' else int(float(distance) + float(twoWayDistance)),
         "price": price
 
         }
@@ -760,12 +804,12 @@ def getPrice():
         return payload
 
     else:
-        price = calculateOneWayPricing(zoneName, int(clearDistance), allDuration, tripType)
+        price = calculateOneWayPricing(zoneName, int(float(distance)), allDuration, tripType)
         payload = {
          'originZone': zoneName,
         'toLocation': destination,
         'duration': allDuration,
-        'distance': distance,
+        'distance': int(float(distance)) if tripType == 'oneWay' else int(float(distance) + float(twoWayDistance)),
         "price": price
 
     }
@@ -784,11 +828,6 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
     zoneName = zone.find_one({'zone_name':nameZone})
     print(nameZone)
     vehicles = db['Vehicles'].find({"zone_id": zoneName['_id']})
-    # print(list(vehicles))
-    # pricePerKM = zoneName['price_per_km']
-    # priceperKmRoundTrip = zoneName['price_perkm_round']
-    
-    # print(distance, type(distance))
     cars = []
     for i in list(vehicles):
         # print(i['vehicle_type'])
@@ -796,54 +835,62 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
     # type = cars.find_one({"vehicle_type": car})
     # cars = ['SUV', 'MUV', 'Hatchback', 'Sedan']
     print(cars)
-    price = {
+    global farePrice
+    if duration in range(0,24):
+        farePrice = 500
+    elif duration in range(24,48):
+        farePrice = 1000
+    elif duration in range(48, 72):
+        farePrice = 1500
+    else:
+        farePrice = 2000
+    fareDetails = {
+        "farePrice": farePrice
     }
-    print(price)
+    extraHours = {
+        "Hatchback": [],
+        "SUV": [],
+        "Sedan": []
+    }
+    price = {
+        "fareDetails": fareDetails,
+        "hours": extraHours
+    }
+    
+
+                    
+    
     if trip == 'oneWay':
         for i in cars:
             if i in zoneName.keys():
                 for j in zoneName[i]['hourly_price']:
                     # print( type(j['from']), type(j['to']))
                     r = range(int(j['from']), int(j['to']))
+                    if duration not in r: 
+                        extraHours[i].append(int(j['price']))
+                    
                     if duration in r:
                         # print(int(zoneName[i]['price_per_km']))
                         price[i] = (int(j['price']) * duration) + (int(zoneName[i]['price_per_km']) * distance)
+                        fareDetails[i] = f"{int(j['price'])} Rs * {duration} Hrs + {int(zoneName[i]['price_per_km'])} Rs * {distance} Kms"
+                    
+                        
+
     elif trip == 'roundTrip':
         for i in cars:
-            for j in zoneName[i + "_round"]['hourly_price_round']:
-                
-                # print( type(j['from']), type(j['to']))
-                r = range(int(j['from']), int(j['to']))
-                if duration in r:
-                    print(duration)
-                    price[i] = (int(j['price']) * duration) + (int(zoneName[i + "_round"]['price_perkm_round']) * distance)
-
+            if i in zoneName.keys():
+                for j in zoneName[i + "_round"]['hourly_price_round']:
+                    # print( type(j['from']), type(j['to']))
+                    r = range(int(j['from']), int(j['to']))
+                    if duration in r:
+                        print(duration)
+                        price[i] = (int(j['price']) * duration) + (int(zoneName[i + "_round"]['price_perkm_round']) * distance)
+                        fareDetails[i] = f"{int(j['price'])} Rs * {duration} Hrs + {int(zoneName[i]['price_per_km'])} Rs * {distance} Kms"
 
     return price
 
     
-    
-    # if duration >= type['from'] and duration <= type['to']:
-    #     return type['price_per_hour'] * duration + (int(type['cost_per_km_one_way']) * distance)
-    # elif duration >=12 and duration <=18:
-    #     return (150 * 2) * duration + (int(type['cost_per_km_one_way']) * distance)
-    # elif duration >18 and duration <= 24:
-    #     return (125 * 2) * duration + (int(type['cost_per_km_one_way']) * distance)
-            # return "hour price double * duration, + cost perkm * durationkm + "
 
-
-def calculateTwoWayPricing(car, distance, duration):
-    cars = db["Vehicles"]
-    type = cars.find_one({"vehicle_type": car})
-    # print(type['vehicle_type'])
-    
-    if type['vehicle_type'] == "Sedan" or type['vehicle_type'] == 'SUV' or type['vehicle_type'] == 'MUV' or type['vehicle_type'] == 'Hatchback':
-        if duration >=1 and duration <=12:
-            return 165 * duration + (int(type['cost_per_km_one_way']) * distance)
-        elif duration >=12 and duration <=18:
-            return 150 * duration + (int(type['cost_per_km_one_way']) * distance)
-        elif duration >18 and duration <= 24:
-            return 125 * duration + (int(type['cost_per_km_one_way']) * distance)
 
 if __name__ == '__main__':
     app.run()
