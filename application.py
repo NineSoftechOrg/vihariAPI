@@ -283,8 +283,7 @@ def getUsers(current):
     return json.loads(json_util.dumps(users_list))
 
 @app.route('/getUser', methods=["POST"])
-@token_required
-def getUser(current):
+def getUser():
     incoming_msg = request.get_json()
     users = db['Customer']
     
@@ -694,41 +693,75 @@ def fetchTrips(current):
     trips = db['Driver'].find_one({'_id': ObjectId(current)})["trips"]
     return json.loads(json_util.dumps(trips)), 200
 
+@app.route('/cancelTrip', methods=["POST"])
+def cancelTrip():
+    incoming_msg = request.get_json()
+    bookingId = incoming_msg['bookingId']
+    trip = db['Bookings'].find_one({"_id": ObjectId(bookingId)})
+    date = trip['travel_date'].split(" ")[:4]
+    return datetime.datetime('2024', 'Jun', '26').time('21:30')
 
 @app.route('/updateTripStatus', methods=['POST'])
 @token_required
 def updateTripStatus(current):
     incoming_msg = request.get_json()
     bookingId = incoming_msg['bookingId']
+    trip = incoming_msg['tripType']
+    vehicleType = incoming_msg['vehicleType']
+    userId = incoming_msg['userId'] if incoming_msg['userId'] else ''
     if incoming_msg['status'] == 'Trip Started':
-        db['Bookings'].update_one({
-            '_id': ObjectId(bookingId)
-        }, {
-            "$set": {"status": incoming_msg['status']}
-        })
-        return "Updated to Trip started"
-    
-    elif incoming_msg['status'] == 'Trip Ended':
-        userId = incoming_msg['userId'] if incoming_msg['userId'] else ''
         otpUser = db['Customer'].find_one({"_id": ObjectId(userId)})['otp']
         otp = incoming_msg['otp'] if incoming_msg['otp'] else ''
         if otp == otpUser:
-            regNumberVehicle = incoming_msg['regNum'] if incoming_msg['regNum'] else ''
-            driverId = incoming_msg['driverId'] if incoming_msg['driverId'] else ''
-            db['Vehicles'].update_one({
-                'registration_number': regNumberVehicle
+            db['Bookings'].update_one({
+                '_id': ObjectId(bookingId)
             }, {
-                "$set": {"status": "active"}
+                "$set": {"status": incoming_msg['status']}
             })
-            db['Driver'].update_one({
-                '_id': ObjectId(driverId)
-            }, {
-                "$set": {"status": "active"}
-            })
-            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
-                 "$set": {"status": incoming_msg['status']}
-            })
-            return "updated"
+            db['Driver'].update_many({
+            "trips.bookingId": ObjectId(bookingId)
+        }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+            return "Updated to Trip started"
+    # {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+    elif incoming_msg['status'] == 'Trip Ended':
+        regNumberVehicle = incoming_msg['regNum'] if incoming_msg['regNum'] else ''
+        booked = db['Bookings'].find_one({"_id": ObjectId(bookingId)})
+        zoneName = booked['orginZone']
+        bookedPrice = booked['total_trip_price']
+        bookedDistance = booked['distance']
+        bookedDuration = booked['duration']
+        duration = incoming_msg['duration'] if incoming_msg['duration'] else ''
+        distance = incoming_msg['distance'] if incoming_msg['distance'] else ''
+        driverId = incoming_msg['driverId'] if incoming_msg['driverId'] else ''
+        db['Vehicles'].update_one({
+            'registration_number': regNumberVehicle
+        }, {
+            "$set": {"status": "active"}
+        })
+        db['Driver'].update_one({
+            '_id': ObjectId(driverId)
+        }, {
+            "$set": {"status": "active"}
+        })
+        db['Driver'].update_many({
+        "trips.bookingId": ObjectId(bookingId)
+    }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+        db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                "$set": {"status": incoming_msg['status']}
+        })
+        price = calculateLastPrice(zoneName, distance, duration, trip, vehicleType)
+
+        extraKm = distance - bookedDistance if distance > bookedDistance else 0
+        extraDuration = duration - bookedDuration if duration > bookedDuration else 0
+
+        return {"Amount": price, 
+                "booked_price": bookedPrice, 
+                "distance_traveled": distance, 
+                "duration": duration, 
+                "booked_distance": bookedDistance, 
+                "booked_duration":bookedDuration,
+                "extraKms": extraKm,
+                "extraHours": extraDuration}
         
     return "otp not valid", 500
 
@@ -753,7 +786,7 @@ def getPrice():
     allDuration = int(durationHours) if int(durationMinutes) == 0 else int(durationHours) + 1
     
     if user:
-        price = calculateOneWayPricing(zoneName, int(float(distance)), allDuration, tripType)
+        price = calculateOneWayPricing(zoneName, int(float(distance)), allDuration, tripType, twoWayDistance)
         
         payload = {
         'originZone': zoneName,
@@ -774,7 +807,7 @@ def getPrice():
         return payload
 
     else:
-        price = calculateOneWayPricing(zoneName, int(float(distance)), allDuration, tripType)
+        price = calculateOneWayPricing(zoneName, int(float(distance)), allDuration, tripType, twoWayDistance)
         payload = {
          'originZone': zoneName,
         'toLocation': destination,
@@ -785,10 +818,31 @@ def getPrice():
     }
         return  payload
     
-    
 
 
-def calculateOneWayPricing(nameZone, distance, duration, trip):
+def calculateLastPrice(zone, distance, duration,trip, vehicleType):
+    zoneName = db['Zone'].find_one({"zone_name": zone})
+    price = 0
+    print(zoneName['Hatchback'])
+    if trip == 'oneWay':
+        for i in zoneName[vehicleType]['hourly_price']:
+            r = range(int(i['from']), int(i['to']))
+            if duration in r:
+                price = (int(i['price']) * duration) + (int(zoneName[vehicleType]['price_per_km']) * distance)
+                break
+    elif trip == "roundTrip":
+        for i in zoneName[vehicleType + "_round"]['hourly_price_round']:
+            r = range(int(i['from']), int(i['to']))
+            if duration in r:
+                price = (int(i['price']) * duration) + (int(zoneName[vehicleType]['price_perkm_round']) * distance)
+                break
+    return price
+
+
+
+
+
+def calculateOneWayPricing(nameZone, distance, duration, trip, twoWayDistance=0):
     zone = db["Zone"]
     # name = nameZone.upper()
     zoneName = zone.find_one({'zone_name':nameZone})
@@ -808,10 +862,9 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
     else:
         farePrice = 2000
     fareDetails = {
-        "farePrice": farePrice
+        "driverAllowance": farePrice
     }
     extraHours = {
-       
     }
     price = {
         "fareDetails": fareDetails,
@@ -833,21 +886,27 @@ def calculateOneWayPricing(nameZone, distance, duration, trip):
                     
                     if duration in r:
                         # print(int(zoneName[i]['price_per_km']))
+                        extraHours[i].append([int(j['price'])])
                         price[i] = (int(j['price']) * duration) + (int(zoneName[i]['price_per_km']) * distance)
                         fareDetails[i] = f"{int(j['price'])} Rs * {duration} Hrs + {int(zoneName[i]['price_per_km'])} Rs * {distance} Kms"
                     
                         
 
     elif trip == 'roundTrip':
+        distance = distance + int(float(twoWayDistance))
         for i in cars:
+            extraHours[i] = []
             if i in zoneName.keys():
                 for j in zoneName[i + "_round"]['hourly_price_round']:
                     # print( type(j['from']), type(j['to']))
                     r = range(int(j['from']), int(j['to']))
+                    if duration not in r: 
+                        extraHours[i + "_round"] = (int(j['price']))
                     if duration in r:
-                        print(duration)
+                        extraHours[i + "_round"] = ([int(j['price'])])
                         price[i] = (int(j['price']) * duration) + (int(zoneName[i + "_round"]['price_perkm_round']) * distance)
-                        fareDetails[i] = f"{int(j['price'])} Rs * {duration} Hrs + {int(zoneName[i]['price_per_km'])} Rs * {distance} Kms"
+
+                        fareDetails[i] = [ int(j['price'])  * duration, int(zoneName[i + '_round']['price_perkm_round'])  * distance]
 
     return price
 
