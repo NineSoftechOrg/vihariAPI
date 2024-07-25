@@ -14,6 +14,7 @@ import jwt
 from functools import wraps
 import datetime
 import random
+import calendar
 
 ca = certifi.where()
 
@@ -699,7 +700,77 @@ def cancelTrip():
     bookingId = incoming_msg['bookingId']
     trip = db['Bookings'].find_one({"_id": ObjectId(bookingId)})
     date = trip['travel_date'].split(" ")[:4]
-    return datetime.datetime('2024', 'Jun', '26').time('21:30')
+    year = date[-1]
+    day = date[-2]
+    
+    months = {"January": 1, "February":2, "March":3, "April":4, "May": 5, "Jun":6, "July":7, "August": 8, "September":9, "October": 10, "November": 11, "December": 12}
+    month = date[-3]
+    # print(months[month])
+    hour = trip['trip_start_datetime'].split(":")[0]
+    minutes = trip['trip_start_datetime'].split(":")[1]
+    booked_date = datetime.datetime(int(year), months[month], int(day), int(hour), int(minutes))
+    # booked_date = datetime.datetime(2024,7,24,20, 00)
+    current_date = datetime.datetime.now()
+    two_hours_prior = current_date - datetime.timedelta(hours=2)
+    print(two_hours_prior.time())
+    # print(booked_date)
+
+    if trip['status'] == 'Booked':
+        if booked_date.date() > two_hours_prior.date():
+            db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+            return "canceled"
+        elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
+            if two_hours_prior.time() < booked_date.time():
+                db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+                return "canceled"
+            return "can't cancell"
+        else:
+            return "can't cancel"
+    elif trip['status'] == "trip confirmed":
+        if booked_date.date() > two_hours_prior.date():
+            db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+            return "canceled"
+        elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
+            if two_hours_prior.time() < booked_date.time():
+                db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+                db['Driver'].delete_many({
+            "trips.bookingId": ObjectId(bookingId)
+        })
+            return "can't cancell"
+        else:
+            return "can't cancel"
+    else: 
+        return "can't cancel running trip"
+    
+
+@app.route('/reschedule', methods=['POST'])
+def reschedule():
+    incoming_msg = request.get_json()
+    bookingId = incoming_msg['bookingId']
+    startDate = incoming_msg['startDate']
+    startTiming = incoming_msg['startingTime']
+    tripType = incoming_msg['tripType']
+    trip = db['Bookings'].find_one({"_id": ObjectId(bookingId)})
+    if trip['status'] == "trip confirmed" or trip['status'] == 'Booked':
+        if tripType == "oneWay":
+            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                "$set": {
+                    "travel_date": startDate,
+                    "trip_start_datetime": startTiming
+                }
+            })
+            return "rescheduled one way trip"
+        elif tripType == 'roundTrip':
+            endTripTime = incoming_msg['endTripTiming'] if incoming_msg['endTripTiming'] else ''
+            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                "$set": {
+                    "travel_date": startDate,
+                    "trip_start_datetime": startTiming,
+                    "trip_end_datetime": endTripTime
+                }
+            })
+            return "rescheduled round trip"
+
 
 @app.route('/updateTripStatus', methods=['POST'])
 @token_required
