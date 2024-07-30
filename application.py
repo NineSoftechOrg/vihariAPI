@@ -14,8 +14,7 @@ import jwt
 from functools import wraps
 import datetime
 import random
-import calendar
-
+import re
 ca = certifi.where()
 
 
@@ -93,7 +92,20 @@ def token_required(f):
 @app.route('/')
 def start():
     # print(currentUser)
-    return "Vihari api is working....."
+    s = db['Driver'].find_one({"_id": ObjectId('6682e2f76ce950c144b3d4b7'), 'trips.bookingId':ObjectId("6682de3b6ce950c144b3d4b5")})
+    trip = [{'bookingId': ObjectId('6682de3b6ce950c144b3d4b5'), 'travel_Date': 'Wed Jul 24 2024 00:00:00 GMT+0530 (India Standard Time)1', 'trip_status': ''},
+             {'bookingId': ObjectId('6682de3b6ce950c144b3d4b3'), 'travel_Date': 'Wed Jul 24 2024 00:00:00 GMT+0530 (India Standard Time)1', 'trip_status': ''},
+             {'bookingId': ObjectId('6682de3b6ce950c144b3d4b9'), 'travel_Date': 'Wed Jul 24 2024 00:00:00 GMT+0530 (India Standard Time)1', 'trip_status': ''}]
+    res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
+    print(res)
+    db['Driver'].update_one({"_id": ObjectId('6682e2f76ce950c144b3d4b7'), 'trips.bookingId':ObjectId("6682de3b6ce950c144b3d4b5")},
+                            {
+                                "$set": {
+                                "trips": res
+                            }
+                            }
+                            )
+    return "its definately working..."
 
 
 @app.route('/order', methods=["POST"])
@@ -183,7 +195,7 @@ def pricing(currentUser):
 @app.route('/setBooking', methods=["POST"])
 def setBooking():
         incoming_msg = request.get_json()['Body'];
-        customer = db['Customer'].find_one({"firstname": incoming_msg['firstname']})
+        customer = db['Customer'].find_one({"firstname": incoming_msg['firstname'], "lastname":incoming_msg['lastname']})
         bookings = db['Bookings']
         vehicles = db['Vehicles']
         zone = db["Zone"].find_one({'zone_name': incoming_msg['from'].upper()})
@@ -369,7 +381,8 @@ def startTrip(current):
         "vehicle_type": cartype['car_type'], "vehicle_name": incoming_msg['vehicleName'], "brand": incoming_msg['brand']
     }, {
         '$set': {
-            "status":"assigned"
+            "status":"assigned",
+            "bookingId": ObjectId(incoming_msg['bookingId'])
         }
     })
     payload = {
@@ -509,9 +522,18 @@ def checkCustomer():
     onlyZoneAdmin = zoneAdmin.find_one({"mobile": incoming_msg['phoneNumber']})
     onlyVendors = vendor.find_one({"mobile": incoming_msg['phoneNumber']})
 
+    data = {
+        "firstname": customer['firstname'],
+        "lastname": customer['lastname'],
+        "email": customer['email'],
+        "mobile": customer['mobile'],
+        "role": customer['role'],
+        "id": customer['_id']
+    }
+
 
     if customer:
-        return json.loads(json_util.dumps(customer))
+        return json.loads(json_util.dumps(data))
     elif onlyAdmin:
         tokenAdmin = jwt.encode({'user_id' : str(onlyAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         admin.update_one(onlyAdmin, {
@@ -718,10 +740,37 @@ def cancelTrip():
     if trip['status'] == 'Booked':
         if booked_date.date() > two_hours_prior.date():
             db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+            s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
+            trip = s['trips']
+            res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
+
+            db['Driver'].update_one({'trips.bookingId':ObjectId(bookingId)},
+                                    {
+                                        "$set": {
+                                        "trips": res
+                                    }
+                                    }
+                                    ) 
             return "canceled"
         elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
             if two_hours_prior.time() < booked_date.time():
                 db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+                s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
+                trip = s['trips']
+                res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
+   
+                db['Driver'].update_one({'trips.bookingId':ObjectId(bookingId)},
+                                        {
+                                            "$set": {
+                                            "trips": res
+                                        }
+                                        }
+                                        ) 
+                db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
+                    "$set": {
+                        "bookingId": ""
+                    }
+                })
                 return "canceled"
             return "can't cancell"
         else:
@@ -729,13 +778,28 @@ def cancelTrip():
     elif trip['status'] == "trip confirmed":
         if booked_date.date() > two_hours_prior.date():
             db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+            db['Driver'].delete_many({
+            "trips.bookingId": ObjectId(bookingId)
+        })
+            db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
+                    "$set": {
+                        "bookingId": ""
+                    }
+                })
             return "canceled"
         elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
             if two_hours_prior.time() < booked_date.time():
                 db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
-                db['Driver'].delete_many({
+                db['Driver'].update_one({
             "trips.bookingId": ObjectId(bookingId)
         })
+                # db['Driver']['status'].remove
+                db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
+                    "$set": {
+                        "bookingId": "",
+                        "status": "active"
+                    }
+                })
             return "can't cancell"
         else:
             return "can't cancel"
