@@ -522,7 +522,11 @@ def checkCustomer():
     onlyZoneAdmin = zoneAdmin.find_one({"mobile": incoming_msg['phoneNumber']})
     onlyVendors = vendor.find_one({"mobile": incoming_msg['phoneNumber']})
 
-    data = {
+    
+  
+
+    if customer:
+        data = {
         "firstname": customer['firstname'],
         "lastname": customer['lastname'],
         "email": customer['email'],
@@ -530,9 +534,6 @@ def checkCustomer():
         "role": customer['role'],
         "id": customer['_id']
     }
-
-
-    if customer:
         return json.loads(json_util.dumps(data))
     elif onlyAdmin:
         tokenAdmin = jwt.encode({'user_id' : str(onlyAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
@@ -573,7 +574,6 @@ def checkCustomer():
         }
     else:
         return "You are not registered, please register first", 400
-
 
 
 
@@ -1049,4 +1049,4 @@ def calculateOneWayPricing(nameZone, distance, duration, trip, twoWayDistance=0)
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=8080)

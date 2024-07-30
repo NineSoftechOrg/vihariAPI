@@ -1,0 +1,9 @@
+
+services:
+  vihari:
+    container_name: backend
+    build: ./
+    command: gunicorn -b 0.0.0.0:8080 application:app --reload
+    working_dir: /usr/vihariApi/
+    ports:
+      - "8080:8080"
