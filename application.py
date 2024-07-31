@@ -253,6 +253,15 @@ def getBookings(current):
     all = list(bookins.find())
     return json.loads(json_util.dumps(all))
 
+@app.route('/getBooking', methods=['POST'])
+@token_required
+def getBooking(current):
+    incoming_msg = request.get_json()
+    booking = db['Bookings'].find_one({"_id": ObjectId(incoming_msg['bookingId'])})
+    if booking:
+        return json.loads(json_util.dumps(booking))
+    else:
+        return "Not found that booking"
 
 @app.route('/getZones')
 @token_required
@@ -844,7 +853,17 @@ def updateTripStatus(current):
     trip = incoming_msg['tripType']
     vehicleType = incoming_msg['vehicleType']
     userId = incoming_msg['userId'] if incoming_msg['userId'] else ''
-    if incoming_msg['status'] == 'Trip Started':
+    if incoming_msg['status'] == 'Driver Arrived':
+        db['Bookings'].update_one({
+                '_id': ObjectId(bookingId)
+            }, {
+                "$set": {"status": incoming_msg['status']}
+            })
+        db['Driver'].update_many({
+        "trips.bookingId": ObjectId(bookingId)
+    }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+        return "Updated to Driver Arrived"
+    elif incoming_msg['status'] == 'Trip Started':
         otpUser = db['Customer'].find_one({"_id": ObjectId(userId)})['otp']
         otp = incoming_msg['otp'] if incoming_msg['otp'] else ''
         if otp == otpUser:
