@@ -92,20 +92,7 @@ def token_required(f):
 @app.route('/')
 def start():
     # print(currentUser)
-    s = db['Driver'].find_one({"_id": ObjectId('6682e2f76ce950c144b3d4b7'), 'trips.bookingId':ObjectId("6682de3b6ce950c144b3d4b5")})
-    trip = [{'bookingId': ObjectId('6682de3b6ce950c144b3d4b5'), 'travel_Date': 'Wed Jul 24 2024 00:00:00 GMT+0530 (India Standard Time)1', 'trip_status': ''},
-             {'bookingId': ObjectId('6682de3b6ce950c144b3d4b3'), 'travel_Date': 'Wed Jul 24 2024 00:00:00 GMT+0530 (India Standard Time)1', 'trip_status': ''},
-             {'bookingId': ObjectId('6682de3b6ce950c144b3d4b9'), 'travel_Date': 'Wed Jul 24 2024 00:00:00 GMT+0530 (India Standard Time)1', 'trip_status': ''}]
-    res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
-    print(res)
-    db['Driver'].update_one({"_id": ObjectId('6682e2f76ce950c144b3d4b7'), 'trips.bookingId':ObjectId("6682de3b6ce950c144b3d4b5")},
-                            {
-                                "$set": {
-                                "trips": res
-                            }
-                            }
-                            )
-    return "its definately working..."
+    return "vihari api working..."
 
 
 @app.route('/order', methods=["POST"])

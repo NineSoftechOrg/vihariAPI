@@ -7,3 +7,5 @@ services:
     working_dir: /usr/vihariApi/
     ports:
       - "8080:8080"
+    volumes:
+      - ./:/usr/vihariApi/
