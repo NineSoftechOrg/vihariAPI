@@ -677,7 +677,6 @@ def createVendor(current):
             "id_proof_back_url": "",
             "profile_url": incoming_msg["profilePic"],
             "pan_card": "",
-            "fuel_type": incoming_msg['fuelType'],
             "role": "vendor"
             
         }
@@ -744,6 +743,7 @@ def createVehicle(current):
         "registration_number":incoming_msg["registerNumber"],
         "vehicle_calender_availability": "",
         "status": "active",
+        "fuel_type": incoming_msg['fuelType'],
         "rc_certificate": incoming_msg['rcCertificateUrl'],
         "premit_certificate": incoming_msg["permitCertificateUrl"],
         "fitness_certificate": incoming_msg["fitnessCertificateUrl"],
