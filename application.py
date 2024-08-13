@@ -15,6 +15,7 @@ from functools import wraps
 import datetime
 import random
 import re
+from flask_caching import Cache
 ca = certifi.where()
 
 
@@ -27,9 +28,16 @@ load_dotenv()
 
 app = Flask(__name__)
 SECRET_KEY = os.environ.get('SECRET_KEY') or 'bamsi'
-print(SECRET_KEY)
+
 app.config['SECRET_KEY'] = SECRET_KEY
 
+
+app.config['CACHE_TYPE'] = os.environ.get('CACHE_TYPE')
+app.config['CACHE_REDIS_HOST'] = os.environ.get('CACHE_REDIS_HOST')
+app.config['CACHE_REDIS_PORT'] = os.environ.get('CACHE_REDIS_PORT')
+app.config['CACHE_REDIS_DB'] = os.environ.get('CACHE_REDIS_DB')
+app.config['CACHE_REDIS_URL'] = os.environ.get('CACHE_REDIS_URL')
+app.config['CACHE_DEFAULT_TIMEOUT'] = os.environ.get('CACHE_DEFAULT_TIMEOUT')
 
 
 
@@ -38,6 +46,7 @@ client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.ne
 
 db = client["vihari"]
 CORS(app, resources={r"/*": {"origins": "*"}})
+
 
 
 def getCurrentUser(id):
@@ -137,7 +146,7 @@ def zone(currentUser):
         }
 
         zone.insert_one(zone_dict)
-        return "working....", 200
+        return "zone created successfully", 200
     
     
     
@@ -174,8 +183,8 @@ def pricing(currentUser):
             }
             
         })
-    print(up)
-    return "worked,,,"
+    
+    return "got price zone"
 
 
 
@@ -188,7 +197,7 @@ def setBooking():
         zone = db["Zone"].find_one({'zone_name': incoming_msg['from'].upper()})
         capacity = vehicles.find_one({"vehicle_type": incoming_msg['car_model'], "zone_id": zone['_id']})
         
-        print(capacity)
+        
         carZone = db['Zone'].find_one({"_id": capacity['zone_id']})
         
         payload = {
@@ -201,6 +210,7 @@ def setBooking():
             "trip_type": incoming_msg['tripType'],
             'trip_start_datetime': incoming_msg['time'],
             'trip_end_datetime': incoming_msg['trip_end_datetime'] if incoming_msg['tripType'] == "roundTrip" else "",
+            'return_date': incoming_msg['returningDate'] if incoming_msg['tripType'] == "roundTrip" else "",
             'car_capacity': capacity['capacity'],
             'travel_date': incoming_msg['travel_date'],
             'car_type': incoming_msg['car_model'],
@@ -212,10 +222,17 @@ def setBooking():
             'payment_type': incoming_msg['payment_type'],
             'user_id': customer['_id'],
             'extra_payment_details': '',
+            'pickup_location': incoming_msg['pickup'],
             'status': 'Booked'
 
         }
         
+        
+        bookings.insert_one(payload)
+        j = list(bookings.find())[-1]
+        # print(j['_id'])
+        payload['bookingId'] = str(j['_id'])
+
         user = db["Customer"].update_one({
             "email": incoming_msg['email'],
         } , {
@@ -225,9 +242,7 @@ def setBooking():
         }
         
         )
-        bookings.insert_one(payload)
-        j = list(bookings.find())[-1]
-        # print(j['_id'])
+        
         return {
             "bookingId":str(j['_id'])
         }
@@ -254,7 +269,7 @@ def getBooking(current):
 @token_required
 def getzones(currentUser):
     zones = db['Zone']
-    print(currentUser)
+    
     zone = zones.find()
     zone_list = list(zone)
     return json.loads(json_util.dumps(zone_list))
@@ -298,8 +313,41 @@ def getUser():
     
     user = users.find_one({"_id": ObjectId(incoming_msg['userId'])})
     users_list = user
+
+    return users_list
+
+@app.route('/getAdmins', methods=['GET'])
+@token_required
+def getAdmins(currentUser):
+  
+    admins = db['Admins'].find_one({"_id": ObjectId(currentUser)})
+    zoneAdmins = db['ZoneAdmins'].find_one({"_id": ObjectId(currentUser)})
+    driver = db['Driver'].find_one({"_id": ObjectId(currentUser)})
+    if admins:
+        return json.loads(json_util.dumps(admins))
+    elif zoneAdmins:
+        return json.loads(json_util.dumps(zoneAdmins))
+    elif driver:
+        return json.loads(json_util.dumps(driver))
     
-    return json.loads(json_util.dumps(users_list))
+@app.route('/updateAdmins', methods=['POST'])
+@token_required
+def updateAdmins(currentUser):
+    incoming_msg = request.get_json()
+    updateType = incoming_msg['type'][0]
+    whereToUpdate = incoming_msg['type'][1]
+    if updateType == 'Update':
+        updateData = incoming_msg['data']
+        db[whereToUpdate].update_one({"_id": ObjectId(currentUser)}, {
+            "$set": {
+                **updateData
+            }
+        })
+        return "Update successfully"
+    elif updateType == 'Delete':
+        db[whereToUpdate].delete_one({"_id": ObjectId(currentUser)})
+        return "Deleted Successfully"
+    
 
 
 @app.route('/getZoneAdmins')
@@ -372,7 +420,7 @@ def startTrip(current):
 
     vehicle = db['Vehicles']
     cartype = db['Bookings'].find_one({"_id": ObjectId(incoming_msg['bookingId'])})
-    print(incoming_msg['bookingId'])
+    
     vehicle.update_one({
         "vehicle_type": cartype['car_type'], "vehicle_name": incoming_msg['vehicleName'], "brand": incoming_msg['brand']
     }, {
@@ -384,7 +432,7 @@ def startTrip(current):
     payload = {
         "bookingId": ObjectId(incoming_msg["bookingId"]),
         "travel_Date": incoming_msg['travelDate'],
-        "trip_status": ""
+        "trip_status": "trip confirmed"
     }
     driver.update_one({
         "firstname": incoming_msg['driverFirstName'], "lastname": incoming_msg['driverLastName']
@@ -404,7 +452,7 @@ def startTrip(current):
 
     })
 
-    return "Booked....."
+    return "Trip confirmed and assigned to a driver"
 
 
 
@@ -421,7 +469,7 @@ def createDriver(currentUser):
     vendor_check = db['Vendors'].find_one({"mobile": incoming_msg['mobile']})
     if "Authorization" in request.headers:
         token = request.headers["Authorization"].split(" ")[1]
-        print(token)
+        
     if driver_check or customer_check or vendor_check:
         return "this number already used", 404
     
@@ -444,7 +492,7 @@ def createDriver(currentUser):
         }
         drivers.insert_one(driver_dict)
 
-        return "working..."
+        return "Driver created successfully"
 
 @app.route('/createAdmin')
 def createAdmin():
@@ -519,7 +567,7 @@ def checkCustomer():
     onlyVendors = vendor.find_one({"mobile": incoming_msg['phoneNumber']})
 
     
-  
+    
 
     if customer:
         data = {
@@ -529,45 +577,71 @@ def checkCustomer():
         "mobile": customer['mobile'],
         "role": customer['role'],
         "id": customer['_id']
-    }
+    }   
         return json.loads(json_util.dumps(data))
     elif onlyAdmin:
         tokenAdmin = jwt.encode({'user_id' : str(onlyAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
+        data = {
+            "firstname": onlyAdmin['firstname'],
+            "lastname": onlyAdmin['lastname'],
+            "email": onlyAdmin['email'],
+            "mobile": onlyAdmin['contact'],
+            "role": onlyAdmin['role'],
+            "id": onlyAdmin['_id'],
+            "token": tokenAdmin
+        }
         admin.update_one(onlyAdmin, {
             "$set": {
                 "token": tokenAdmin
             }
         })
         # print(onlyAdmin['_id'])
-        return {
-            "admin": json.loads(json_util.dumps(onlyAdmin)),
-            "token":tokenAdmin
-        } 
+        return json.loads(json_util.dumps(data))
     elif onlyZoneAdmin:
-        tokenAdmin = jwt.encode({'user_id' : str(onlyZoneAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
+        zoneadminToken = jwt.encode({'user_id' : str(onlyZoneAdmin['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
+        data = {
+        "firstname": onlyZoneAdmin['firstname'],
+        "lastname": onlyZoneAdmin['lastname'],
+        "email": onlyZoneAdmin['email'],
+        "mobile": onlyZoneAdmin['mobile'],
+        "role": onlyZoneAdmin['role'],
+        "id": onlyZoneAdmin['_id'],
+        "token": zoneadminToken
+        }
         zoneAdmin.update_one(onlyZoneAdmin, {
             "$set": {
-                "token": tokenAdmin
+                "token": zoneadminToken
             }
         })
-        return {
-            "zoneAdmin": json.loads(json_util.dumps(onlyZoneAdmin)),
-            "token": tokenAdmin
-        }
+        return json.loads(json_util.dumps(data))
     elif onlyVendors:
-        return json.loads(json_util.dumps(onlyVendors))
+        data = {
+        "firstname": onlyZoneAdmin['firstname'],
+        "lastname": onlyZoneAdmin['lastname'],
+        "email": onlyZoneAdmin['email'],
+        "mobile": onlyZoneAdmin['mobile'],
+        "role": onlyZoneAdmin['role'],
+        "id": onlyZoneAdmin['_id']
+        } 
+        return json.loads(json_util.dumps(data))
     elif onlyDriver:
-        tokenAdmin = jwt.encode({'user_id' : str(onlyDriver['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
+        driverToken = jwt.encode({'user_id' : str(onlyDriver['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         db['Driver'].update_one(onlyDriver, {
             "$set": {
                 "token": tokenAdmin
                 # "token": jwt({"user_id": str(onlyDriver["_id"])}, "driver", )
             }
         })
-        return {
-            "driver": json.loads(json_util.dumps(onlyDriver)),
-            "token": tokenAdmin
-        }
+        data = {
+        "firstname": onlyZoneAdmin['firstname'],
+        "lastname": onlyZoneAdmin['lastname'],
+        "email": onlyZoneAdmin['email'],
+        "mobile": onlyZoneAdmin['mobile'],
+        "role": onlyZoneAdmin['role'],
+        "id": onlyZoneAdmin['_id'],
+        "token": driverToken
+        } 
+        return json.loads(json_util.dumps(data))
     else:
         return "You are not registered, please register first", 400
 
@@ -603,13 +677,14 @@ def createVendor(current):
             "id_proof_back_url": "",
             "profile_url": incoming_msg["profilePic"],
             "pan_card": "",
+            "fuel_type": incoming_msg['fuelType'],
             "role": "vendor"
             
         }
 
         vendors.insert_one(vendors_dict)
         # print(incoming_msg)
-        return "working....."
+        return "New Vendor created Successfully"
 
 @app.route('/createZoneAdmin', methods=["POST"])
 @token_required
@@ -647,7 +722,7 @@ def createZoneAdmin(current):
 
         zone_admins.insert_one(vendors_dict)
         # print(incoming_msg)
-        return "working....."
+        return "ZoneAdmin got greated successfully"
 
 @app.route('/createVehicle', methods=["POST"])
 @token_required
@@ -683,7 +758,7 @@ def createVehicle(current):
 
     vehicles.insert_one(vehicle_dict)
     # print(driver['_id'])
-    return "working....."
+    return "vehicle got created successfully"
 
 
 @app.route('/update', methods=['POST'])
@@ -693,7 +768,6 @@ def updateTable(current):
     updateType = incoming_msg['type'][0];
     whereToDeleteOrUpdate = incoming_msg['type'][1]
     updateData = incoming_msg['data']
-    print(updateData)
     userId = incoming_msg['userId']
     if updateType == 'Delete':
         db[whereToDeleteOrUpdate].delete_one({"_id": ObjectId(userId)})
@@ -703,7 +777,7 @@ def updateTable(current):
                 **updateData
             }
         })
-    return "Working..."
+    return "updated successfully"
 
 
 @app.route('/fetchTrips', methods=["GET"])
@@ -726,79 +800,82 @@ def cancelTrip():
     # print(months[month])
     hour = trip['trip_start_datetime'].split(":")[0]
     minutes = trip['trip_start_datetime'].split(":")[1]
-    booked_date = datetime.datetime(int(year), months[month], int(day), int(hour), int(minutes))
+    booked_date = datetime.datetime(int(year), int(month), int(day), int(hour), int(minutes))
     # booked_date = datetime.datetime(2024,7,24,20, 00)
     current_date = datetime.datetime.now()
     two_hours_prior = current_date - datetime.timedelta(hours=2)
-    print(two_hours_prior.time())
+    
     # print(booked_date)
 
     if trip['status'] == 'Booked':
         if booked_date.date() > two_hours_prior.date():
             db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
-            s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
-            trip = s['trips']
-            res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
+            # s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
+            # trip = s['trips']
+            # res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
 
-            db['Driver'].update_one({'trips.bookingId':ObjectId(bookingId)},
-                                    {
-                                        "$set": {
-                                        "trips": res
-                                    }
-                                    }
-                                    ) 
+            # db['Driver'].update_one({'trips.bookingId':ObjectId(bookingId)},
+            #                         {
+            #                             "$set": {
+            #                             "trips.$.trip_status": "Cancelled"
+            #                         }
+            #                         }
+            #                         )
+            db['Customer'].delete_one({'booking_history.bookingId': ObjectId(bookingId)}) 
             return "canceled"
         elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
             if two_hours_prior.time() < booked_date.time():
                 db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
-                s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
-                trip = s['trips']
-                res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
+                # s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
+                # trip = s['trips']
+                # res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
    
-                db['Driver'].update_one({'trips.bookingId':ObjectId(bookingId)},
-                                        {
-                                            "$set": {
-                                            "trips": res
-                                        }
-                                        }
-                                        ) 
-                db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
-                    "$set": {
-                        "bookingId": ""
-                    }
-                })
+                # db['Driver'].update_one({'trips.bookingId':ObjectId(bookingId)},
+                #                         {
+                #                             "$set": {
+                #                             "trips": res
+                #                         }
+                #                         }
+                #                         ) 
+                # db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
+                #     "$set": {
+                #         "bookingId": "",
+                #         "status":"active"
+                #     }
+                # })
+                db['Customer'].delete_one({'booking_history.bookingId': ObjectId(bookingId)})
                 return "canceled"
             return "can't cancell"
         else:
             return "can't cancel"
-    elif trip['status'] == "trip confirmed":
-        if booked_date.date() > two_hours_prior.date():
-            db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
-            db['Driver'].delete_many({
-            "trips.bookingId": ObjectId(bookingId)
-        })
-            db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
-                    "$set": {
-                        "bookingId": ""
-                    }
-                })
-            return "canceled"
-        elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
-            if two_hours_prior.time() < booked_date.time():
-                db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
-                db['Driver'].update_one({
-            "trips.bookingId": ObjectId(bookingId)
-        })
-                # db['Driver']['status'].remove
-                db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
-                    "$set": {
-                        "bookingId": "",
-                        "status": "active"
-                    }
-                })
-            return "can't cancell"
-        else:
-            return "can't cancel"
+    # elif trip['status'] == "trip confirmed":
+    #     if booked_date.date() > two_hours_prior.date():
+    #         db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+    #         db['Driver'].delete_many({
+    #         "trips.bookingId": ObjectId(bookingId)
+    #     })
+    #         db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
+    #                 "$set": {
+    #                     "bookingId": ""
+    #                 }
+    #             })
+    #         return "canceled"
+    #     elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
+    #         if two_hours_prior.time() < booked_date.time():
+    #             db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+    #             db['Driver'].update_one({
+    #         "trips.bookingId": ObjectId(bookingId)
+    #     })
+    #             # db['Driver']['status'].remove
+    #             db['Vehicles'].update_one({"bookingId": ObjectId(bookingId)}, {
+    #                 "$set": {
+    #                     "bookingId": "",
+    #                     "status": "active"
+    #                 }
+    #             })
+    #         return "can't cancell"
+    #     else:
+    #         return "can't cancel"
     else: 
         return "can't cancel running trip"
     
@@ -808,33 +885,46 @@ def reschedule():
     incoming_msg = request.get_json()
     bookingId = incoming_msg['bookingId']
     startDate = incoming_msg['startDate']
+    dateFormat = startDate.split(" ")[:4]
     startTiming = incoming_msg['startingTime']
+    exactData = datetime.datetime(int(dateFormat[-1]), int(dateFormat[-3]), int(dateFormat[-2]), int(startTiming.split(":")[0]), int(startTiming.split(":")[1]))
+    two_hour_prios = datetime.datetime.now() - datetime.timedelta(hours=2)
+
     tripType = incoming_msg['tripType']
     trip = db['Bookings'].find_one({"_id": ObjectId(bookingId)})
-    if trip['status'] == "trip confirmed" or trip['status'] == 'Booked':
-        if tripType == "oneWay":
-            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
-                "$set": {
-                    "travel_date": startDate,
-                    "trip_start_datetime": startTiming
-                }
-            })
-            return "rescheduled one way trip"
-        elif tripType == 'roundTrip':
-            endTripTime = incoming_msg['endTripTiming'] if incoming_msg['endTripTiming'] else ''
-            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
-                "$set": {
-                    "travel_date": startDate,
-                    "trip_start_datetime": startTiming,
-                    "trip_end_datetime": endTripTime
-                }
-            })
-            return "rescheduled round trip"
+    if exactData > datetime.datetime.now():
+        if trip['status'] == 'Booked':
+            if tripType == "oneWay":
+                db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                    "$set": {
+                        "travel_date": startDate,
+                        "trip_start_datetime": startTiming
+                    }
+                })
+                db['Customer'].update_one({"booking_history.bookingId": ObjectId(bookingId)}, {
+                    "$set": {
+                        "booking_history.$.travel_date": startDate,
+                        "booking_history.$.trip_start_datetime": startTiming
+                    }
+                })
+                return "rescheduled one way trip"
+            elif tripType == 'roundTrip':
+                endTripTime = incoming_msg['endTripTiming'] if incoming_msg['endTripTiming'] else ''
+                returnDate = incoming_msg['returnDate'] if incoming_msg['endTripTiming'] else ''
+                db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                    "$set": {
+                        "travel_date": startDate,
+                        "trip_start_datetime": startTiming,
+                        "trip_end_datetime": endTripTime,
+                        "return_date": returnDate
+                    }
+                })
+                return "rescheduled round trip"
+    return "cant't reschedule"
 
 
 @app.route('/updateTripStatus', methods=['POST'])
-@token_required
-def updateTripStatus(current):
+def updateTripStatus():
     incoming_msg = request.get_json()
     bookingId = incoming_msg['bookingId']
     trip = incoming_msg['tripType']
@@ -870,14 +960,14 @@ def updateTripStatus(current):
         zoneName = booked['orginZone']
         bookedPrice = booked['total_trip_price']
         bookedDistance = booked['distance']
-        bookedDuration = booked['duration']
+        bookedDuration = int(booked['duration'])
         duration = incoming_msg['duration'] if incoming_msg['duration'] else ''
         distance = incoming_msg['distance'] if incoming_msg['distance'] else ''
         driverId = incoming_msg['driverId'] if incoming_msg['driverId'] else ''
         db['Vehicles'].update_one({
             'registration_number': regNumberVehicle
         }, {
-            "$set": {"status": "active"}
+            "$set": {"status": "active", "bookingId": ""}
         })
         db['Driver'].update_one({
             '_id': ObjectId(driverId)
@@ -891,18 +981,17 @@ def updateTripStatus(current):
                 "$set": {"status": incoming_msg['status']}
         })
         price = calculateLastPrice(zoneName, distance, duration, trip, vehicleType)
-
         extraKm = distance - bookedDistance if distance > bookedDistance else 0
         extraDuration = duration - bookedDuration if duration > bookedDuration else 0
 
-        return {"Amount": price, 
+        return json.loads(json_util.dumps({"Amount": price, 
                 "booked_price": bookedPrice, 
                 "distance_traveled": distance, 
                 "duration": duration, 
                 "booked_distance": bookedDistance, 
                 "booked_duration":bookedDuration,
                 "extraKms": extraKm,
-                "extraHours": extraDuration}
+                "extraHours": extraDuration})) 
         
     return "otp not valid", 500
 
@@ -964,7 +1053,7 @@ def getPrice():
 def calculateLastPrice(zone, distance, duration,trip, vehicleType):
     zoneName = db['Zone'].find_one({"zone_name": zone})
     price = 0
-    print(zoneName['Hatchback'])
+    
     if trip == 'oneWay':
         for i in zoneName[vehicleType]['hourly_price']:
             r = range(int(i['from']), int(i['to']))
@@ -992,7 +1081,7 @@ def calculateOneWayPricing(nameZone, distance, duration, trip, twoWayDistance=0)
     for i in list(vehicles):
         # print(i['vehicle_type'])
         cars.append(i['vehicle_type'])
-    print(cars)
+    
     global farePrice
     if duration in range(0,24):
         farePrice = 500
@@ -1029,22 +1118,22 @@ def calculateOneWayPricing(nameZone, distance, duration, trip, twoWayDistance=0)
                         # print(int(zoneName[i]['price_per_km']))
                         extraHours[i].append([int(j['price'])])
                         price[i] = (int(j['price']) * duration) + (int(zoneName[i]['price_per_km']) * distance)
-                        fareDetails[i] = f"{int(j['price'])} Rs * {duration} Hrs + {int(zoneName[i]['price_per_km'])} Rs * {distance} Kms"
+                        fareDetails[i] = [ int(j['price']) * duration, int(zoneName[i]['price_per_km']) * distance]
                     
                         
 
     elif trip == 'roundTrip':
         distance = distance + int(float(twoWayDistance))
         for i in cars:
-            extraHours[i] = []
-            if i in zoneName.keys():
+            extraHours[i + "_round"] = []
+            if i + '_round' in zoneName.keys():
                 for j in zoneName[i + "_round"]['hourly_price_round']:
                     # print( type(j['from']), type(j['to']))
                     r = range(int(j['from']), int(j['to']))
                     if duration not in r: 
-                        extraHours[i + "_round"] = (int(j['price']))
+                        extraHours[i + "_round"].append(int(j['price']))
                     if duration in r:
-                        extraHours[i + "_round"] = ([int(j['price'])])
+                        extraHours[i + "_round"].append([int(j['price'])])
                         price[i] = (int(j['price']) * duration) + (int(zoneName[i + "_round"]['price_perkm_round']) * distance)
 
                         fareDetails[i] = [ int(j['price'])  * duration, int(zoneName[i + '_round']['price_perkm_round'])  * distance]
