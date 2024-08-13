@@ -11,3 +11,7 @@ using Docker
 
 ```sudo docker buildx b -t vihari .```
 ```sudo docker run -it -p 5000:5000 vihari```
+
+or 
+``` sudo docker-compose up --build ``` # sudo is optional
+``` sudo docker-compose run ``` #sudo is optional
