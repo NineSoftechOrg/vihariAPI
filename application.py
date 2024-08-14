@@ -925,7 +925,8 @@ def reschedule():
 
 
 @app.route('/updateTripStatus', methods=['POST'])
-def updateTripStatus():
+@token_required
+def updateTripStatus(current):
     incoming_msg = request.get_json()
     bookingId = incoming_msg['bookingId']
     trip = incoming_msg['tripType']
@@ -1003,10 +1004,10 @@ def getPrice():
     origin = incoming_msg['origin_zone']
     destination = incoming_msg['destination']
     tripType = incoming_msg['trip_type']
-    userFirstName = incoming_msg['user_id']
+    userId = incoming_msg['user_id']
     zoneName = incoming_msg['origin_zone'].upper()
     zone = db['Zone']
-    user = db['Customer'].find_one({"firstname": userFirstName})
+    user = db['Customer'].find_one({"_id": ObjectId(userId)})
 
     my_dist = gmaps.distance_matrix(origin,destination)['rows'][0]['elements'][0]
     distance = my_dist['distance']['text'].split(' ')[0].replace(',', '')
@@ -1028,7 +1029,7 @@ def getPrice():
 
         }
         db['Customer'].update_one(
-            {'firstname': user['firstname']},
+            {'_id': ObjectId(userId)},
             {
                 "$push": {
                     "search_history": payload
