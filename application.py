@@ -795,12 +795,12 @@ def cancelTrip():
     year = date[-1]
     day = date[-2]
     
-    months = {"January": 1, "February":2, "March":3, "April":4, "May": 5, "Jun":6, "July":7, "August": 8, "September":9, "October": 10, "November": 11, "December": 12}
-    month = date[-3]
+    months = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov":11, "Dec":12}
+    month = months[date[1]]
     # print(months[month])
     hour = trip['trip_start_datetime'].split(":")[0]
     minutes = trip['trip_start_datetime'].split(":")[1]
-    booked_date = datetime.datetime(int(year), int(month), int(day), int(hour), int(minutes))
+    booked_date = datetime.datetime(int(year), month, int(day), int(hour), int(minutes))
     # booked_date = datetime.datetime(2024,7,24,20, 00)
     current_date = datetime.datetime.now()
     two_hours_prior = current_date - datetime.timedelta(hours=2)
@@ -821,7 +821,11 @@ def cancelTrip():
             #                         }
             #                         }
             #                         )
-            db['Customer'].delete_one({'booking_history.bookingId': ObjectId(bookingId)}) 
+            db['Customer'].update_one({'booking_history.bookingId': bookingId}, {
+            "$pull" : {
+                "booking_history.bookingId": bookingId
+            }
+        }) 
             return "canceled"
         elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
             if two_hours_prior.time() < booked_date.time():
@@ -843,7 +847,11 @@ def cancelTrip():
                 #         "status":"active"
                 #     }
                 # })
-                db['Customer'].delete_one({'booking_history.bookingId': ObjectId(bookingId)})
+                db['Customer'].update_one({'booking_history.bookingId': bookingId}, {
+            "$pull" : {
+                "booking_history.bookingId": bookingId
+            }
+        }) 
                 return "canceled"
             return "can't cancell"
         else:
@@ -887,7 +895,11 @@ def reschedule():
     startDate = incoming_msg['startDate']
     dateFormat = startDate.split(" ")[:4]
     startTiming = incoming_msg['startingTime']
-    exactData = datetime.datetime(int(dateFormat[-1]), int(dateFormat[-3]), int(dateFormat[-2]), int(startTiming.split(":")[0]), int(startTiming.split(":")[1]))
+    months = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov":11, "Dec":12}
+    month = months[dateFormat[1]]
+
+    exactData = datetime.datetime(int(dateFormat[-1]), month, int(dateFormat[-2]), int(startTiming.split(":")[0]), int(startTiming.split(":")[1]))
+
     two_hour_prios = datetime.datetime.now() - datetime.timedelta(hours=2)
 
     tripType = incoming_msg['tripType']
