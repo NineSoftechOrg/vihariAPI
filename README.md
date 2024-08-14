@@ -15,3 +15,4 @@ using Docker
 or 
 ``` sudo docker-compose up --build ``` # sudo is optional
 ``` sudo docker-compose run ``` #sudo is optional
+:qa 

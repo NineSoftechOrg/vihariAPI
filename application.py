@@ -767,11 +767,12 @@ def updateTable(current):
     incoming_msg = request.get_json()["Body"];
     updateType = incoming_msg['type'][0];
     whereToDeleteOrUpdate = incoming_msg['type'][1]
-    updateData = incoming_msg['data']
+    
     userId = incoming_msg['userId']
     if updateType == 'Delete':
         db[whereToDeleteOrUpdate].delete_one({"_id": ObjectId(userId)})
     elif updateType == 'Update':
+        updateData = incoming_msg['data'] if incoming_msg['data'] else ''
         db[whereToDeleteOrUpdate].update_one({"_id": ObjectId(userId)}, {
             "$set": {
                 **updateData
