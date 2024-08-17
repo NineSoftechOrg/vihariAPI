@@ -191,7 +191,7 @@ def pricing(currentUser):
 @app.route('/setBooking', methods=["POST"])
 def setBooking():
         incoming_msg = request.get_json()['Body'];
-        customer = db['Customer'].find_one({"firstname": incoming_msg['firstname'], "lastname":incoming_msg['lastname']})
+        customer = db['Customer'].find_one({"_id": ObjectId(incoming_msg['user_id'])})
         bookings = db['Bookings']
         vehicles = db['Vehicles']
         zone = db["Zone"].find_one({'zone_name': incoming_msg['from'].upper()})
@@ -231,10 +231,10 @@ def setBooking():
         bookings.insert_one(payload)
         j = list(bookings.find())[-1]
         # print(j['_id'])
-        payload['bookingId'] = str(j['_id'])
+        # payload['bookingId'] = str(j['_id'])
 
         user = db["Customer"].update_one({
-            "email": incoming_msg['email'],
+            "_id": ObjectId(incoming_msg['user_id']),
         } , {
             '$push': {
                 "booking_history": payload
@@ -338,14 +338,14 @@ def updateAdmins(currentUser):
     whereToUpdate = incoming_msg['type'][1]
     if updateType == 'Update':
         updateData = incoming_msg['data']
-        db[whereToUpdate].update_one({"_id": ObjectId(currentUser)}, {
+        db[whereToUpdate].update_one({"_id": ObjectId(incoming_msg['user_id'])}, {
             "$set": {
                 **updateData
             }
         })
         return "Update successfully"
     elif updateType == 'Delete':
-        db[whereToUpdate].delete_one({"_id": ObjectId(currentUser)})
+        db[whereToUpdate].delete_one({"_id": ObjectId(incoming_msg['user_id'])})
         return "Deleted Successfully"
     
 
@@ -391,6 +391,28 @@ def trips(current):
     return json.loads(json_util.dumps(f))
     
 
+@app.route('/updateDriverStatus')
+@token_required
+def updateDriverStatus(current):
+    driver = db['Driver'].find_one({"_id": ObjectId(current)})
+    if driver:
+        if driver['status'] == 'inactive':
+            db['Driver'].update_one({"_id": ObjectId(current)}, {
+                "$set": {
+                    "status": "active"
+                }
+            })
+            return "Driver got active mode"
+        elif driver['status'] == 'active':
+            db['Driver'].update_one({"_id": ObjectId(current)}, {
+                "$set": {
+                    "status": "inactive"
+                }
+            })
+            return "Driver got inactive mode"
+    return "No driver found"
+
+
 @app.route('/getDrivers')
 @token_required
 def getDrivers(current):
@@ -417,41 +439,58 @@ def getDrivers(current):
 def startTrip(current):
     incoming_msg = request.get_json()
     driver = db['Driver']
-
-    vehicle = db['Vehicles']
     cartype = db['Bookings'].find_one({"_id": ObjectId(incoming_msg['bookingId'])})
-    
-    vehicle.update_one({
-        "vehicle_type": cartype['car_type'], "vehicle_name": incoming_msg['vehicleName'], "brand": incoming_msg['brand']
-    }, {
-        '$set': {
-            "status":"assigned",
-            "bookingId": ObjectId(incoming_msg['bookingId'])
-        }
-    })
+    vehicle = db['Vehicles']
+    availabe_vehicle = vehicle.find_one({ "vehicle_type": cartype['car_type'], "vehicle_name": incoming_msg['vehicleName'], "brand": incoming_msg['brand'], "status":"active"})
+    available_driver = driver.find_one({"_id": ObjectId(incoming_msg['driver_id']), "status": "active"})
     payload = {
-        "bookingId": ObjectId(incoming_msg["bookingId"]),
-        "travel_Date": incoming_msg['travelDate'],
-        "trip_status": "trip confirmed"
-    }
-    driver.update_one({
-        "firstname": incoming_msg['driverFirstName'], "lastname": incoming_msg['driverLastName']
-    }, {"$set": {
-        "status": "assigned",
-    }, 
-        "$push": {
-            "trips": payload,
+            "bookingId": ObjectId(incoming_msg["bookingId"]),
+            "travel_Date": incoming_msg['travelDate'],
+            "trip_status": "trip confirmed"
         }
-    })
-    db['Bookings'].update_one({
-        "_id": ObjectId(incoming_msg['bookingId'])
-    }, {
-        "$set": {
-            "status": "trip confirmed"
-        }
+    try:
+        if availabe_vehicle and available_driver:
+            vehicle.update_one({
+                "vehicle_type": cartype['car_type'], "vehicle_name": incoming_msg['vehicleName'], "brand": incoming_msg['brand'], "status":"active"
+            }, {
+                '$set': {
+                    "status":"assigned",
+                    "bookingId": ObjectId(incoming_msg['bookingId'])
+                }
+            })
+            driver.update_one({
+            "_id": ObjectId(incoming_msg['driver_id']), "status": "active"
+        }, {"$set": {
+            "status": "assigned",
+        }, 
+            "$push": {
+                "trips": payload,
+            }
+        })
+            db['Customer'].update_one({'booking_history._id': ObjectId(incoming_msg['bookingId'])}, {
+            "$set": {
+                "booking_history.$.status": "trip confirmed"
+            }
+        })
+            db['Bookings'].update_one({
+                "_id": ObjectId(incoming_msg['bookingId'])
+            }, {
+                "$set": {
+                    "status": "trip confirmed"
+                }
 
-    })
+            })
+        else:
+            raise e
 
+    except Exception as e:
+        return "couldn't assign a trip to a vehicle and a driver", 400
+    
+   
+    
+
+    
+    
     return "Trip confirmed and assigned to a driver"
 
 
@@ -616,32 +655,34 @@ def checkCustomer():
         return json.loads(json_util.dumps(data))
     elif onlyVendors:
         data = {
-        "firstname": onlyZoneAdmin['firstname'],
-        "lastname": onlyZoneAdmin['lastname'],
-        "email": onlyZoneAdmin['email'],
-        "mobile": onlyZoneAdmin['mobile'],
-        "role": onlyZoneAdmin['role'],
-        "id": onlyZoneAdmin['_id']
+        "firstname": onlyVendors['firstname'],
+        "lastname": onlyVendors['lastname'],
+        "email": onlyVendors['email'],
+        "mobile": onlyVendors['mobile'],
+        "role": onlyVendors['role'],
+        "id": onlyVendors['_id']
         } 
         return json.loads(json_util.dumps(data))
     elif onlyDriver:
         driverToken = jwt.encode({'user_id' : str(onlyDriver['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         db['Driver'].update_one(onlyDriver, {
             "$set": {
-                "token": tokenAdmin
+                "token": driverToken
                 # "token": jwt({"user_id": str(onlyDriver["_id"])}, "driver", )
             }
         })
         data = {
-        "firstname": onlyZoneAdmin['firstname'],
-        "lastname": onlyZoneAdmin['lastname'],
-        "email": onlyZoneAdmin['email'],
-        "mobile": onlyZoneAdmin['mobile'],
-        "role": onlyZoneAdmin['role'],
-        "id": onlyZoneAdmin['_id'],
+        "firstname": onlyDriver['firstname'],
+        "lastname": onlyDriver['lastname'],
+        "email": onlyDriver['email'],
+        "mobile": onlyDriver['mobile'],
+        "id": onlyDriver['_id'],
         "token": driverToken
         } 
-        return json.loads(json_util.dumps(data))
+        return json.loads(json_util.dumps({
+            "data": onlyDriver,
+            "token": driverToken
+        }))
     else:
         return "You are not registered, please register first", 400
 
@@ -821,11 +862,13 @@ def cancelTrip():
             #                         }
             #                         }
             #                         )
-            db['Customer'].update_one({'booking_history.bookingId': bookingId}, {
+            db['Customer'].update_one({'booking_history._id': ObjectId(bookingId)}, {
             "$pull" : {
-                "booking_history.bookingId": bookingId
+                "booking_history": {"_id": ObjectId(bookingId)}
             }
-        }) 
+            })
+        
+         
             return "canceled"
         elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
             if two_hours_prior.time() < booked_date.time():
@@ -847,11 +890,11 @@ def cancelTrip():
                 #         "status":"active"
                 #     }
                 # })
-                db['Customer'].update_one({'booking_history.bookingId': bookingId}, {
+                db['Customer'].update_one({'booking_history._id': ObjectId(bookingId)}, {
             "$pull" : {
-                "booking_history.bookingId": bookingId
+                "booking_history": {"_id": ObjectId(bookingId)}
             }
-        }) 
+            })
                 return "canceled"
             return "can't cancell"
         else:
@@ -913,7 +956,8 @@ def reschedule():
                         "trip_start_datetime": startTiming
                     }
                 })
-                db['Customer'].update_one({"booking_history.bookingId": ObjectId(bookingId)}, {
+                
+                db['Customer'].update_one({"booking_history._id": ObjectId(bookingId)}, {
                     "$set": {
                         "booking_history.$.travel_date": startDate,
                         "booking_history.$.trip_start_datetime": startTiming
