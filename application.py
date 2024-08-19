@@ -131,7 +131,7 @@ def zone(currentUser):
     zone_check = zone.find_one({"zone_name": incoming_msg["zoneName"].upper()})
     
     if zone_check:
-        return "already zone created", 404
+        return "already zone created", 400
     else:
         zone_dict = {
             "zone_name": incoming_msg['zoneName'].upper(),
@@ -148,8 +148,16 @@ def zone(currentUser):
         zone.insert_one(zone_dict)
         return "zone created successfully", 200
     
-    
-    
+
+@app.route('/createZone/<id>', methods=["DELETE"])
+@token_required
+def deleteZone(current, id):
+    zone = db['Zone'].find_one({"_id": ObjectId(id)})  
+    if zone:
+        db['Zone'].delete_one({"_id": ObjectId(id)})
+        return f"{zone['zone_name']} has been deleted"
+    else:
+        return "No zone to be deleted"
 
 @app.route('/setPriceZone', methods=["POST"])
 @token_required
@@ -159,7 +167,7 @@ def pricing(currentUser):
     vehicleType = incoming_msg['zoneName']['vehicleType'] if incoming_msg['trip'] == 'oneWay' else incoming_msg['vehicleType']
     # print(vehicleType)
     if incoming_msg['trip'] == "oneWay":
-        up = zone.update_one({
+        zone.update_one({
             'zone_name': incoming_msg['zoneName']['zoneName']
         }, {
             "$set": {
@@ -171,8 +179,10 @@ def pricing(currentUser):
                 
             }
         })
+        return "oneWay prices for this zone been set "
+
     else:
-        up = zone.update_one({
+        zone.update_one({
             'zone_name': incoming_msg['zoneName']['zoneName']
         }, {
             "$set": {
@@ -183,8 +193,20 @@ def pricing(currentUser):
             }
             
         })
+        return f"the prices of this zone for roundTrip has been set"
     
-    return "got price zone"
+
+# @app.route('/setPriceZone/<zoneId>/<vehicleTyoe>/<tripType>', methods=['DELETE'])
+# @token_required
+# def deletePriceZone(current, zoneId, vehicleTyoe, tripType):
+#     zone = db['Zone'].find_one({"_id": ObjectId(zoneId)})
+#     if zone and tripType == 'oneWay':
+#         db['Zone'].update_one({"_id": ObjectId(zoneId)}, {
+#             "$unset": {
+#                 vehicleTyoe
+#             }
+#         })
+#         return "price got deleted"
 
 
 
@@ -313,8 +335,11 @@ def getUser():
     
     user = users.find_one({"_id": ObjectId(incoming_msg['userId'])})
     users_list = user
-
-    return users_list
+    if user:
+        return json.loads(json_util.dumps(users_list))
+    else:
+        return "No user found", 400
+    
 
 @app.route('/getAdmins', methods=['GET'])
 @token_required
@@ -510,7 +535,7 @@ def createDriver(currentUser):
         token = request.headers["Authorization"].split(" ")[1]
         
     if driver_check or customer_check or vendor_check:
-        return "this number already used", 404
+        return "this number already used", 400
     
     else:
         driver_dict = {
@@ -700,7 +725,7 @@ def createVendor(current):
     customer_check = db['Customer'].find_one({"mobile": incoming_msg['mobile']})
     vendor_check = db['Vendors'].find_one({"mobile": incoming_msg['mobile']})
     if driver_check or customer_check or vendor_check:
-        return "this number already used", 404
+        return "this number already used", 400
 
     else:
         vendors_dict = {
@@ -738,7 +763,7 @@ def createZoneAdmin(current):
     customer_check = db['Customer'].find_one({"mobile": incoming_msg['mobile']})
     vendor_check = db['Vendors'].find_one({"mobile": incoming_msg['mobile']})
     if driver_check or customer_check or vendor_check:
-        return "this number already used", 404
+        return "this number already used", 400
     
     else:
         vendors_dict = {
@@ -801,6 +826,31 @@ def createVehicle(current):
     # print(driver['_id'])
     return "vehicle got created successfully"
 
+@app.route('/createVehicle/<id>', methods=["PUT"])
+@token_required
+def updateVehicle(current, id):
+    incoming_msg = request.get_json();
+    vehicle = db['Vehicles'].find_one({"_id": ObjectId(id)})
+    if vehicle:
+        db['Vehicles'].update_one({"_id": ObjectId(id)}, {
+            "$set": {
+                **incoming_msg['data']
+            }
+        })
+        return "vehicle updated"
+    else:
+        return "NO vehicle to be updated", 400
+    
+
+@app.route('/createVehicle/<id>', methods=["DELETE"])
+@token_required
+def deleteVehicle(current, id):
+    vehicle = db['Vehicles'].find_one({"_id": ObjectId(id)})
+    if vehicle:
+        db['Vehicles'].delete_one({"_id": ObjectId(id)})
+        return f"Vehicle {vehicle['vehicle_type']} got deleted"
+    else:
+        return "No vehicle to delete", 400
 
 @app.route('/update', methods=['POST'])
 def updateTable():
@@ -896,9 +946,9 @@ def cancelTrip():
             }
             })
                 return "canceled"
-            return "can't cancell"
+            return "can't cancell", 400
         else:
-            return "can't cancel"
+            return "can't cancel", 400
     # elif trip['status'] == "trip confirmed":
     #     if booked_date.date() > two_hours_prior.date():
     #         db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
@@ -928,7 +978,7 @@ def cancelTrip():
     #     else:
     #         return "can't cancel"
     else: 
-        return "can't cancel running trip"
+        return "can't cancel running trip", 400
     
 
 @app.route('/reschedule', methods=['POST'])
@@ -975,8 +1025,16 @@ def reschedule():
                         "return_date": returnDate
                     }
                 })
+                db['Customer'].update_one({"booking_history._id": ObjectId(bookingId)}, {
+                    "$set": {
+                        "booking_history.$.travel_date": startDate,
+                        "booking_history.$.trip_start_datetime": startTiming,
+                        "booking_history.$.trip_end_datetime": endTripTime,
+                        "booking_history.$.return_date": returnDate
+                    }
+                })
                 return "rescheduled round trip"
-    return "cant't reschedule"
+    return "cant't reschedule", 400
 
 
 @app.route('/updateTripStatus', methods=['POST'])
@@ -1050,7 +1108,7 @@ def updateTripStatus(current):
                 "extraKms": extraKm,
                 "extraHours": extraDuration})) 
         
-    return "otp not valid", 500
+    return "couldn't update trip status", 400
 
 
 @app.route('/getPrice', methods=['POST'])
