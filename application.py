@@ -164,36 +164,43 @@ def deleteZone(current, id):
 def pricing(currentUser):
     incoming_msg = request.get_json();
     zone = db['Zone'];
+    zoneUpdate = zone.find_one({'zone_name': incoming_msg['zoneName']['zoneName']})
     vehicleType = incoming_msg['zoneName']['vehicleType'] if incoming_msg['trip'] == 'oneWay' else incoming_msg['vehicleType']
     # print(vehicleType)
     if incoming_msg['trip'] == "oneWay":
-        zone.update_one({
-            'zone_name': incoming_msg['zoneName']['zoneName']
-        }, {
-            "$set": {
-                vehicleType : {
-                    "price_per_km": incoming_msg['zoneName']['pricePerKm'], 
-                    "hourly_price": incoming_msg['zoneName']['hourlyPrice']
+        if zoneUpdate:
+            zone.update_one({
+                'zone_name': incoming_msg['zoneName']['zoneName']
+            }, {
+                "$set": {
+                    vehicleType : {
+                        "price_per_km": incoming_msg['zoneName']['pricePerKm'], 
+                        "hourly_price": incoming_msg['zoneName']['hourlyPrice']
+                        
+                    }
                     
                 }
-                
-            }
-        })
-        return "oneWay prices for this zone been set "
+            })
+            return "oneWay prices for this zone been set "
+        else:
+            return "that zone hasn't been found"
 
     else:
-        zone.update_one({
-            'zone_name': incoming_msg['zoneName']['zoneName']
-        }, {
-            "$set": {
-                vehicleType + "_round": {
-                    "price_perkm_round": incoming_msg['priceroundTrip'],
-                    "hourly_price_round": incoming_msg['hourlyPrice']
+        if zoneUpdate:
+            zone.update_one({
+                'zone_name': incoming_msg['zoneName']['zoneName']
+            }, {
+                "$set": {
+                    vehicleType + "_round": {
+                        "price_perkm_round": incoming_msg['priceroundTrip'],
+                        "hourly_price_round": incoming_msg['hourlyPrice']
+                    }
                 }
-            }
-            
-        })
-        return f"the prices of this zone for roundTrip has been set"
+                
+            })
+            return f"the prices of this zone for roundTrip has been set"
+        else:
+            return "that zone has not been found"
     
 
 # @app.route('/setPriceZone/<zoneId>/<vehicleTyoe>/<tripType>', methods=['DELETE'])
@@ -238,7 +245,7 @@ def setBooking():
             'car_type': incoming_msg['car_model'],
             'car_zone': carZone['zone_name'],
             'car_info': '',
-            'car_registration_number': capacity['registration_number'],
+            # 'car_registration_number': capacity['registration_number'],
             'booking_price': '',
             'payment_status': 'Paid' if incoming_msg['payment_type'] != "COD" else "PENDING",
             'payment_type': incoming_msg['payment_type'],
@@ -501,7 +508,8 @@ def startTrip(current):
                 "_id": ObjectId(incoming_msg['bookingId'])
             }, {
                 "$set": {
-                    "status": "trip confirmed"
+                    "status": "trip confirmed",
+                    "car_registration_number": availabe_vehicle['registration_number']
                 }
 
             })
@@ -900,7 +908,11 @@ def cancelTrip():
 
     if trip['status'] == 'Booked':
         if booked_date.date() > two_hours_prior.date():
-            db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                "$set": {
+                    "status": "Trip Cancelled"
+                }
+            })
             # s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
             # trip = s['trips']
             # res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
@@ -913,8 +925,8 @@ def cancelTrip():
             #                         }
             #                         )
             db['Customer'].update_one({'booking_history._id': ObjectId(bookingId)}, {
-            "$pull" : {
-                "booking_history": {"_id": ObjectId(bookingId)}
+            "$set" : {
+                "booking_history.$.status": "Trip Cancelled"
             }
             })
         
@@ -922,7 +934,11 @@ def cancelTrip():
             return "canceled"
         elif booked_date.date() == two_hours_prior.date() and current_date.time() < booked_date.time():
             if two_hours_prior.time() < booked_date.time():
-                db['Bookings'].delete_one({"_id": ObjectId(bookingId)})
+                db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                "$set": {
+                    "status": "Trip Cancelled"
+                }
+            })
                 # s = db['Driver'].find_one({'trips.bookingId':ObjectId(bookingId)})
                 # trip = s['trips']
                 # res = list(filter(lambda x: (x['bookingId'] != ObjectId('6682de3b6ce950c144b3d4b5')), trip))
@@ -941,8 +957,8 @@ def cancelTrip():
                 #     }
                 # })
                 db['Customer'].update_one({'booking_history._id': ObjectId(bookingId)}, {
-            "$pull" : {
-                "booking_history": {"_id": ObjectId(bookingId)}
+            "$set" : {
+                "booking_history.$.status": "Trip Cancelled"
             }
             })
                 return "canceled"
