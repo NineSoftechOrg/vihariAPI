@@ -804,7 +804,7 @@ def createZoneAdmin(current):
 def createVehicle(current):
     incoming_msg = request.get_json()["Body"];
     vehicles = db['Vehicles']
-    zone = db["Zone"].find_one({"zone_name": ObjectId(incoming_msg["zone"])})
+    zone = db["Zone"].find_one({"zone_name": incoming_msg["zone"]})
     checkRegisterNumber = vehicles.find_one({"registration_number": incoming_msg["registerNumber"]})
     vehicle_dict = {
         "zone_id": zone['_id'],
@@ -1217,12 +1217,14 @@ def calculateOneWayPricing(nameZone, distance, duration, trip, twoWayDistance=0)
         cars.append(i['vehicle_type'])
     
     global farePrice
-    if duration in range(0,24):
-        farePrice = 500
-    elif duration in range(24,48):
-        farePrice = 1000
+    if duration in range(0,12):
+        farePrice = 200
+    elif duration in range(12,24):
+        farePrice = 300
+    elif duration in range(24, 48):
+        farePrice = 600
     elif duration in range(48, 72):
-        farePrice = 1500
+        farePrice = 900
     else:
         farePrice = 2000
     fareDetails = {
