@@ -223,6 +223,8 @@ def setBooking():
         customer = db['Customer'].find_one({"_id": ObjectId(incoming_msg['user_id'])})
         bookings = db['Bookings']
         vehicles = db['Vehicles']
+        zoneAdmin = db['ZoneAdmins'].find_one({"_id": ObjectId(incoming_msg['user_id'])})
+        driver = db['Driver'].find_one({"_id": ObjectId(incoming_msg['user_id'])})
         zone = db["Zone"].find_one({'zone_name': incoming_msg['from'].upper()})
         capacity = vehicles.find_one({"vehicle_type": incoming_msg['car_model'], "zone_id": zone['_id']})
         
@@ -249,7 +251,7 @@ def setBooking():
             'booking_price': '',
             'payment_status': 'Paid' if incoming_msg['payment_type'] != "COD" else "PENDING",
             'payment_type': incoming_msg['payment_type'],
-            'user_id': customer['_id'],
+            'user_id': customer['_id'] or driver['_id'] or zoneAdmin['_id'],
             'extra_payment_details': '',
             'pickup_location': incoming_msg['pickup'],
             'status': 'Booked'
@@ -802,7 +804,7 @@ def createZoneAdmin(current):
 def createVehicle(current):
     incoming_msg = request.get_json()["Body"];
     vehicles = db['Vehicles']
-    zone = db["Zone"].find_one({"_id": ObjectId(incoming_msg["zone"])})
+    zone = db["Zone"].find_one({"zone_name": ObjectId(incoming_msg["zone"])})
     checkRegisterNumber = vehicles.find_one({"registration_number": incoming_msg["registerNumber"]})
     vehicle_dict = {
         "zone_id": zone['_id'],
@@ -812,6 +814,7 @@ def createVehicle(current):
         "capacity": incoming_msg["capacity"],
         "mileage": incoming_msg["mileage"],
         'zone': zone,
+        "make": incoming_msg['make'],
         "vehicle_owner": incoming_msg["ownerType"],
         "added_by" :incoming_msg["addedBy"],
         "registration_number":incoming_msg["registerNumber"],
