@@ -414,8 +414,8 @@ def trips(current):
                "destination": i['to'],
                "tripType": i['trip_type'],
                "payment_status": i['payment_status'],
-               "vehicle": list(vehicles.find({"vehicle_type": vehicle_type, "status": "assigned", "zone_id": zone.find_one({"zone_name": zones.upper()})['_id']})),
-               "Driver":list(driver.find({"status": "assigned", "zone.zone_name": zones.upper()})),
+               "vehicle": list(vehicles.find({"vehicle_type": vehicle_type, "status": "active", "zone_id": zone.find_one({"zone_name": zones.upper()})['_id']})),
+               "Driver":list(driver.find({"status": "active", "zone.zone_name": zones.upper()})),
                "status": i['status'],
                "car_type": i['car_type'],
                "travel_date": i['travel_date']
