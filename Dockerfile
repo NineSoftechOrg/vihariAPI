@@ -9,4 +9,4 @@ RUN pip install -r requirements.txt
 
 RUN pip install gunicorn
 
-CMD ["python", "application.py"]
+CMD ["python", "app.py"]
