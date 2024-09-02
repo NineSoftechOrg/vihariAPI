@@ -16,7 +16,11 @@ import datetime
 import random
 import re
 from flask_caching import Cache
-import math
+import requests
+from pywa import WhatsApp
+from pywa.types import Template as Temp
+
+
 ca = certifi.where()
 
 
@@ -40,9 +44,12 @@ app.config['CACHE_REDIS_DB'] = os.environ.get('CACHE_REDIS_DB')
 app.config['CACHE_REDIS_URL'] = os.environ.get('CACHE_REDIS_URL')
 app.config['CACHE_DEFAULT_TIMEOUT'] = os.environ.get('CACHE_DEFAULT_TIMEOUT')
 
+app.config['WHATSAPP_TOKEN'] = os.environ.get('WHATSAPP_TOKEN')
 
-
-
+wa = WhatsApp(
+    phone_id='337121586160174',  # The phone id you got from the API Setup
+    token=app.config['WHATSAPP_TOKEN']  # The token you got from the API Setup
+)
 client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", tlsCAFile=ca)
 
 db = client["vihari"]
@@ -102,6 +109,8 @@ def token_required(f):
 @app.route('/')
 def start():
     # print(currentUser)
+    url = 'https://graph.facebook.com/v20.0/337121586160174/messages'
+    
     return "vihari api working..."
 
 
@@ -290,17 +299,13 @@ def getBookings(current):
         zone = i['orginZone']
         
         f.append({
+            **i,
             "vehicle": db['Vehicles'].find_one({"registration_number": i['car_registration_number']}) if i['status'] == 'trip confirmed' else '',
-            "driver": db['Driver'].find_one({"_id": ObjectId(i['driver_id'])})
+            "driver": db['Driver'].find_one({"_id": ObjectId(i['driver_id'])}) if i['status'] == 'trip confirmed' else '',
         })
     
-    all.append(f[0]['vehicle'])
-    all.append(f[0]['driver'])
-    # print(f[0]['vehicle'])
-    # print(f[0]['driver'])
 
-
-    return json.loads(json_util.dumps(all))
+    return json.loads(json_util.dumps(f))
 
 @app.route('/getBooking', methods=['POST'])
 @token_required
@@ -434,7 +439,8 @@ def trips(current):
                "Driver":list(driver.find({"status": "active", "zone.zone_name": zones.upper()})),
                "status": i['status'],
                "car_type": i['car_type'],
-               "travel_date": i['travel_date']
+               "travel_date": i['travel_date'],
+               "starting_time": i['trip_start_datetime']
             }
         )
     # print(f)
@@ -493,6 +499,7 @@ def startTrip(current):
     vehicle = db['Vehicles']
     availabe_vehicle = vehicle.find_one({ "vehicle_type": cartype['car_type'], "vehicle_name": incoming_msg['vehicleName'], "brand": incoming_msg['brand'], "status":"active"})
     available_driver = driver.find_one({"_id": ObjectId(incoming_msg['driver_id']), "status": "active"})
+    user = db['Customer'].find_one({'booking_history._id': ObjectId(incoming_msg['bookingId'])})
     payload = {
             "bookingId": ObjectId(incoming_msg["bookingId"]),
             "travel_Date": incoming_msg['travelDate'],
@@ -532,6 +539,17 @@ def startTrip(current):
                 }
 
             })
+            wa.send_template(
+                to=user['mobile'],
+                    template=Temp(
+                    name='booking_confirrmation',
+                    language=Temp.Language.ENGLISH,
+                    body=[
+                        Temp.TextValue(value=user['firstname']),
+                    ]
+                ),
+            )
+            
         else:
             raise e
 
@@ -1081,56 +1099,85 @@ def updateTripStatus(current):
     trip = incoming_msg['tripType']
     vehicleType = incoming_msg['vehicleType']
     userId = incoming_msg['userId'] if incoming_msg['userId'] else ''
-    if incoming_msg['status'] == 'Driver Arrived':
-        db['Bookings'].update_one({
-                '_id': ObjectId(bookingId)
-            }, {
-                "$set": {"status": incoming_msg['status']}
-            })
-        db['Driver'].update_many({
-        "trips.bookingId": ObjectId(bookingId)
-    }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
-        return "Updated to Driver Arrived"
-    elif incoming_msg['status'] == 'Trip Started':
-        otpUser = db['Customer'].find_one({"_id": ObjectId(userId)})['otp']
-        otp = incoming_msg['otp'] if incoming_msg['otp'] else ''
-        if otp == otpUser:
+    user = db['Customer'].find_one({"_id": ObjectId(userId)})
+    if user:
+        if incoming_msg['status'] == 'Driver Arrived':
             db['Bookings'].update_one({
-                '_id': ObjectId(bookingId)
+                    '_id': ObjectId(bookingId)
+                }, {
+                    "$set": {"status": incoming_msg['status']}
+                })
+            db['Driver'].update_many({
+            "trips.bookingId": ObjectId(bookingId)
+        }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+            db['Customer'].update_one({"booking_history._id": ObjectId(bookingId)}, {
+                "$set": {
+                    "booking_history.$.status": incoming_msg['status']
+                }
+            })
+            wa.send_template(
+                to=user['mobile'],
+                    template=Temp(
+                    name='arrived',
+                    language=Temp.Language.ENGLISH,
+                    body=[
+                        Temp.TextValue(value=user['firstname']),
+                    ]
+                ),
+            )
+            return "Updated to Driver Arrived"
+        elif incoming_msg['status'] == 'Trip Started':
+            otpUser = db['Customer'].find_one({"_id": ObjectId(userId)})['otp']
+            otp = incoming_msg['otp'] if incoming_msg['otp'] else ''
+            if otp == otpUser:
+                db['Bookings'].update_one({
+                    '_id': ObjectId(bookingId)
+                }, {
+                    "$set": {"status": incoming_msg['status']}
+                })
+                db['Driver'].update_many({
+                "trips.bookingId": ObjectId(bookingId)
+            }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+              
+                db['Customer'].update_one({"booking_history._id": ObjectId(bookingId)}, {
+                "$set": {
+                    "booking_history.$.status": incoming_msg['status']
+                }
+            })
+
+                return "Updated to Trip started"
+        # {"$set":{"trips.$.trip_status":incoming_msg['status']}})
+        elif incoming_msg['status'] == 'Trip Ended':
+            regNumberVehicle = incoming_msg['regNum'] if incoming_msg['regNum'] else ''
+            booked = db['Bookings'].find_one({"_id": ObjectId(bookingId)})
+            zoneName = booked['orginZone']
+            bookedPrice = booked['total_trip_price']
+            bookedDistance = booked['distance']
+            bookedDuration = int(booked['duration'])
+            duration = incoming_msg['duration'] if incoming_msg['duration'] else ''
+            distance = incoming_msg['distance'] if incoming_msg['distance'] else ''
+            driverId = incoming_msg['driverId'] if incoming_msg['driverId'] else ''
+            db['Vehicles'].update_one({
+                'registration_number': regNumberVehicle
             }, {
-                "$set": {"status": incoming_msg['status']}
+                "$set": {"status": "active", "bookingId": ""}
+            })
+            db['Driver'].update_one({
+                '_id': ObjectId(driverId)
+            }, {
+                "$set": {"status": "active"}
             })
             db['Driver'].update_many({
             "trips.bookingId": ObjectId(bookingId)
         }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
-            return "Updated to Trip started"
-    # {"$set":{"trips.$.trip_status":incoming_msg['status']}})
-    elif incoming_msg['status'] == 'Trip Ended':
-        regNumberVehicle = incoming_msg['regNum'] if incoming_msg['regNum'] else ''
-        booked = db['Bookings'].find_one({"_id": ObjectId(bookingId)})
-        zoneName = booked['orginZone']
-        bookedPrice = booked['total_trip_price']
-        bookedDistance = booked['distance']
-        bookedDuration = int(booked['duration'])
-        duration = incoming_msg['duration'] if incoming_msg['duration'] else ''
-        distance = incoming_msg['distance'] if incoming_msg['distance'] else ''
-        driverId = incoming_msg['driverId'] if incoming_msg['driverId'] else ''
-        db['Vehicles'].update_one({
-            'registration_number': regNumberVehicle
-        }, {
-            "$set": {"status": "active", "bookingId": ""}
-        })
-        db['Driver'].update_one({
-            '_id': ObjectId(driverId)
-        }, {
-            "$set": {"status": "active"}
-        })
-        db['Driver'].update_many({
-        "trips.bookingId": ObjectId(bookingId)
-    }, {"$set":{"trips.$.trip_status":incoming_msg['status']}})
-        db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
-                "$set": {"status": incoming_msg['status']}
-        })
+            db['Bookings'].update_one({"_id": ObjectId(bookingId)}, {
+                    "$set": {"status": incoming_msg['status']}
+            })
+            db['Customer'].update_one({"booking_history._id": ObjectId(bookingId)}, {
+                "$set": {
+                    "booking_history.$.status": incoming_msg['status']
+                }
+            })
         price = calculateLastPrice(zoneName, distance, duration, trip, vehicleType)
         extraKm = distance - bookedDistance if distance > bookedDistance else 0
         extraDuration = duration - bookedDuration if duration > bookedDuration else 0
@@ -1144,7 +1191,7 @@ def updateTripStatus(current):
                 "extraKms": extraKm,
                 "extraHours": extraDuration})) 
         
-    return "couldn't update trip status", 400
+    return "couldn't update trip status, may be the user is not exist", 400
 
 @app.route('/getPrice', methods=['POST'])
 def getPrice():
