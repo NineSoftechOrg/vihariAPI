@@ -25,7 +25,6 @@ ca = certifi.where()
 
 
 gmaps = googlemaps.Client(key='AIzaSyAL9K2tfUIeuX0SkO2EZ4Ig55gbtPeZs-c')
-key = 'AIzaSyAL9K2tfUIeuX0SkO2EZ4Ig55gbtPeZs-c'
 
 
 
@@ -104,15 +103,15 @@ def token_required(f):
     return decorated
 
 
-def find_nearest_zone(lat, lng):
-    r = gmaps.geocode("KHAMMAM, TELANGANA, INDIA")
-    l = r[0]['geometry']['location']['lat']
-    ln = r[0]['geometry']['location']['lng']
-    zones = [
-    {"id": "hyderabad", "lat": 17.406498, "lng": 78.47724389999999},
-    {"id":"Khammam", "lat": 17.2472528, "lng": 80.1514447}
-    # Add more zones as needed...
-]
+def find_nearest_zone(zones, lat, lng):
+#     r = gmaps.geocode("KHAMMAM, TELANGANA, INDIA")
+#     l = r[0]['geometry']['location']['lat']
+#     ln = r[0]['geometry']['location']['lng']
+#     zones = [
+#     {"id": "hyderabad", "lat": 17.406498, "lng": 78.47724389999999},
+#     {"id":"Khammam", "lat": 17.2472528, "lng": 80.1514447}
+#     # Add more zones as needed...
+# ]
     nearest_zone = None
     min_distance = float('inf')
     
@@ -146,10 +145,10 @@ def start():
     # }
 
     # print(response)
-    nearest_zone = find_nearest_zone(float("17.2472528"), float("80.1514447"))
-    if nearest_zone:
-        return jsonify({'nearest_zone': nearest_zone['id']})
-    # r = gmaps.geocode("Plair Reservoir ,Khammam, TELANGANA, INDIA")
+    # nearest_zone = find_nearest_zone(float("17.2472528"), float("80.1514447"))
+    # if nearest_zone:
+    #     return jsonify({'nearest_zone': nearest_zone['id']})
+    # r = gmaps.geocode("ELURU, ANDHRA PRADESH, INDIA")
     # print(r[0]['geometry']['location'])
     return "vihari api working..."
 
@@ -1275,6 +1274,11 @@ def getPrice():
     tripType = incoming_msg['trip_type']
     userId = incoming_msg['user_id']
     zoneName = origin.upper()
+    zones = list(db['Zone'].find())
+    zoneDetail = find_lat_lng_zone(origin)
+    nearest_zone = find_nearest_zone(zones, float(zoneDetail['lat']), float(zoneDetail['lng']))
+    if nearest_zone:
+        zoneName = nearest_zone['zone_name'].upper()
     user = ''
     if userId:
         user = db['Customer'].find_one({"_id": ObjectId(userId)})
@@ -1350,6 +1354,11 @@ def calculateLastPrice(zone, distance, duration,trip, vehicleType):
     return price
 
 
+def find_lat_lng_zone(zone):
+    r = gmaps.geocode(zone)
+    l = r[0]['geometry']['location']['lat']
+    ln = r[0]['geometry']['location']['lng']
+    return {"lat": l, "lng": ln}
 
 
 def calculateOneWayPricing(nameZone, distance, duration, trip, twoWayDistance=0):
