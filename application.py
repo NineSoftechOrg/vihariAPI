@@ -25,7 +25,7 @@ ca = certifi.where()
 
 
 gmaps = googlemaps.Client(key='AIzaSyAL9K2tfUIeuX0SkO2EZ4Ig55gbtPeZs-c')
-
+key = 'AIzaSyAL9K2tfUIeuX0SkO2EZ4Ig55gbtPeZs-c'
 
 
 
@@ -104,13 +104,53 @@ def token_required(f):
     return decorated
 
 
+def find_nearest_zone(lat, lng):
+    r = gmaps.geocode("KHAMMAM, TELANGANA, INDIA")
+    l = r[0]['geometry']['location']['lat']
+    ln = r[0]['geometry']['location']['lng']
+    zones = [
+    {"id": "hyderabad", "lat": 17.406498, "lng": 78.47724389999999},
+    {"id":"Khammam", "lat": 17.2472528, "lng": 80.1514447}
+    # Add more zones as needed...
+]
+    nearest_zone = None
+    min_distance = float('inf')
+    
+    for zone in zones:
+        distance = calculate_distance(lat, lng, zone["lat"], zone["lng"])
+        
+        if distance < min_distance:
+            min_distance = distance
+            nearest_zone = zone
+    
+    return nearest_zone
 
+def calculate_distance(lat1, lng1, lat2, lng2):
+    result = gmaps.distance_matrix((lat1, lng1), (lat2, lng2)) 
+    if "error_message" in result['rows'][0]['elements'][0]:
+        return None, False # Return none for distance and false as the place is not within zone
+    print(result['rows'][0]['elements'][0]['distance']['value'])
+    # data = result.json()
+    if 'rows' in result and len(result['rows']) > 0:
+        distance = result['rows'][0]['elements'][0]['distance']['value']
+        return float(distance) * 0.000621371  # Convert meters to miles
+    else:
+        return None
 
 @app.route('/')
 def start():
-    # print(currentUser)
-    url = 'https://graph.facebook.com/v20.0/337121586160174/messages'
-    
+    # distance, is_within_zone = calculate_distance(17.3990023, 78.4156933, 17.406498, 78.47724389999999)
+    # response = {
+    #     'isWithinZone': is_within_zone,
+    #     'distanceInMeters': distance if not None else "No data available"
+    # }
+
+    # print(response)
+    nearest_zone = find_nearest_zone(float("17.2472528"), float("80.1514447"))
+    if nearest_zone:
+        return jsonify({'nearest_zone': nearest_zone['id']})
+    # r = gmaps.geocode("Plair Reservoir ,Khammam, TELANGANA, INDIA")
+    # print(r[0]['geometry']['location'])
     return "vihari api working..."
 
 
@@ -315,7 +355,7 @@ def getBooking(current):
     if booking:
         return json.loads(json_util.dumps(booking))
     else:
-        return "Not found that booking"
+        return "Not found that booking", 400
 
 @app.route('/getZones')
 @token_required
@@ -326,6 +366,19 @@ def getzones(currentUser):
     zone_list = list(zone)
     return json.loads(json_util.dumps(zone_list))
 
+@app.route('/getZone', methods=['POST'])
+@token_required
+def getzone(currentUser):
+    incoming_msg = request.get_json()
+    zones = db['Zone']
+    
+    zone = zones.find_one({"_id": ObjectId(incoming_msg['zoneId'])})
+    # zone_list = list(zone)
+    if zone:
+        return json.loads(json_util.dumps(zone))
+    else:
+        return "Not found that zone", 400
+    
 
 @app.route('/getVendors')
 @token_required
@@ -415,6 +468,22 @@ def getZoneAdmins(current):
     
     return json.loads(json_util.dumps(zoneadmin_list))
 
+@app.route('/getZoneAdmin', methods=['POST'])
+@token_required
+def getZoneAdmin(current):
+    incoming_msg = request.get_json()
+    zoneAdmins = db['ZoneAdmins']
+    
+    zoneAdmin = zoneAdmins.find_one({"_id": ObjectId(incoming_msg['zoneAdminId'])})
+    # zoneadmin_list = list(zoneAdmin)
+    if zoneAdmin:
+        return json.loads(json_util.dumps(zoneAdmin))
+    else:
+        return "not found that zoneAdming", 400
+
+    
+    
+
 @app.route('/trips')
 @token_required
 def trips(current):
@@ -422,12 +491,13 @@ def trips(current):
     vehicles = db["Vehicles"]
     zone = db["Zone"]
     driver = db['Driver']
+    customer = db['Customer']
     all = list(bookings.find())
     f = []
     for i in all:
         zones = i['orginZone']
         vehicle_type = i['car_type']
-        
+        userInfo = customer.find_one({"_id": i['user_id']})
         f.append(
             {
                "orderId": i["_id"],
@@ -440,7 +510,9 @@ def trips(current):
                "status": i['status'],
                "car_type": i['car_type'],
                "travel_date": i['travel_date'],
-               "starting_time": i['trip_start_datetime']
+               "starting_time": i['trip_start_datetime'],
+               "display_name": userInfo['firstname'] + userInfo['lastname'],
+               "mobile": userInfo['mobile']
             }
         )
     # print(f)
@@ -724,13 +796,15 @@ def checkCustomer():
         })
         return json.loads(json_util.dumps(data))
     elif onlyVendors:
+        vendorToken = jwt.encode({'user_id' : str(onlyVendors['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
         data = {
         "firstname": onlyVendors['firstname'],
         "lastname": onlyVendors['lastname'],
         "email": onlyVendors['email'],
         "mobile": onlyVendors['mobile'],
         "role": onlyVendors['role'],
-        "id": onlyVendors['_id']
+        "id": onlyVendors['_id'],
+        "token": vendorToken
         } 
         return json.loads(json_util.dumps(data))
     elif onlyDriver:
