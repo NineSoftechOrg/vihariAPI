@@ -113,15 +113,15 @@ def find_nearest_zone(zones, lat, lng):
 #     # Add more zones as needed...
 # ]
     nearest_zone = None
-    min_distance = float('inf')
-    
+    min_distance = 0
+    print("minimum distance: ", min_distance)
     for zone in zones:
         distance = calculate_distance(lat, lng, zone["lat"], zone["lng"])
-        
+        min_distance = zone['geofence_radius']
         if distance < min_distance:
             min_distance = distance
             nearest_zone = zone
-    
+    print("dis", distance)
     return nearest_zone
 
 def calculate_distance(lat1, lng1, lat2, lng2):
@@ -150,6 +150,16 @@ def start():
     #     return jsonify({'nearest_zone': nearest_zone['id']})
     # r = gmaps.geocode("ELURU, ANDHRA PRADESH, INDIA")
     # print(r[0]['geometry']['location'])
+    wa.send_template(
+                to="+917710285988",
+                    template=Temp(
+                    name='arrived',
+                    language=Temp.Language.ENGLISH,
+                    body=[
+                        Temp.TextValue(value=user['firstname']),
+                    ]
+                ),
+            )
     return "vihari api working..."
 
 
@@ -276,7 +286,7 @@ def setBooking():
         driver = db['Driver'].find_one({"_id": ObjectId(incoming_msg['user_id'])})
         zone = db["Zone"].find_one({'zone_name': incoming_msg['from'].upper()})
         capacity = vehicles.find_one({"vehicle_type": incoming_msg['car_model'], "zone_id": zone['_id']})
-        
+        # user = db['Customer'].find_one({"_id": ObjectId(incoming_msg['user_id'])})
         
         carZone = db['Zone'].find_one({"_id": capacity['zone_id']})
         
@@ -303,6 +313,7 @@ def setBooking():
             'user_id': customer['_id'] or driver['_id'] or zoneAdmin['_id'],
             'extra_payment_details': '',
             'pickup_location': incoming_msg['pickup'],
+            'zone_id': zone['_id'],
             'status': 'Booked'
 
         }
@@ -322,6 +333,28 @@ def setBooking():
         }
         
         )
+        wa.send_template(
+                to=customer['mobile'],
+                    template=Temp(
+                    name='successful_booking',
+                    language=Temp.Language.ENGLISH,
+                    body=[
+            Temp.TextValue(value=customer['firstname']),
+            Temp.TextValue(value=str(ObjectId(j['_id']))),
+            Temp.TextValue(value=payload['status']),
+            Temp.TextValue(value=payload['orginZone']),
+            Temp.TextValue(value=payload['to']),
+            Temp.TextValue(value=payload['travel_date']),
+            Temp.TextValue(value=payload['trip_start_datetime']),
+            Temp.TextValue(value=payload['pickup_location']),
+            Temp.TextValue(value=payload['total_trip_price']),
+            Temp.TextValue(value=payload['distance']),
+            Temp.TextValue(value=payload['duration']),
+            Temp.TextValue(value=incoming_msg['driverAllowance']),
+            Temp.TextValue(value=incoming_msg['estimated']),
+        ],
+                ),
+            )
         
         return {
             "bookingId":str(j['_id'])
@@ -804,7 +837,12 @@ def checkCustomer():
         "role": onlyVendors['role'],
         "id": onlyVendors['_id'],
         "token": vendorToken
-        } 
+        }
+        vendor.update_one(onlyVendors, {
+            "$set": {
+                "token": vendorToken
+            }
+        })
         return json.loads(json_util.dumps(data))
     elif onlyDriver:
         driverToken = jwt.encode({'user_id' : str(onlyDriver['_id']), 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=24)}, app.config['SECRET_KEY'], "HS256")
@@ -1117,7 +1155,7 @@ def reschedule():
     startTiming = incoming_msg['startingTime']
     months = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov":11, "Dec":12}
     month = months[dateFormat[1]]
-
+    user = db['Customer'].find_one({"booking_history._id": ObjectId(bookingId)})
     exactData = datetime.datetime(int(dateFormat[-1]), month, int(dateFormat[-2]), int(startTiming.split(":")[0]), int(startTiming.split(":")[1]))
 
     two_hour_prios = datetime.datetime.now() - datetime.timedelta(hours=2)
@@ -1140,6 +1178,19 @@ def reschedule():
                         "booking_history.$.trip_start_datetime": startTiming
                     }
                 })
+                wa.send_template(
+                to=user['mobile'],
+                    template=Temp(
+                    name='reschedule_booking',
+                    language=Temp.Language.ENGLISH,
+                    body=[
+            Temp.TextValue(value=trip['orginZone']),
+            Temp.TextValue(value=trip['to']),
+            Temp.TextValue(value=startDate),
+            Temp.TextValue(value=startTiming)
+        ],
+                ),
+            )
                 return "rescheduled one way trip"
             elif tripType == 'roundTrip':
                 endTripTime = incoming_msg['endTripTiming'] if incoming_msg['endTripTiming'] else ''
@@ -1160,6 +1211,19 @@ def reschedule():
                         "booking_history.$.return_date": returnDate
                     }
                 })
+                wa.send_template(
+                    to=user['mobile'],
+                        template=Temp(
+                        name='reschedule_booking',
+                        language=Temp.Language.ENGLISH,
+                        body=[
+                Temp.TextValue(value=trip['orginZone']),
+                Temp.TextValue(value=trip['to']),
+                Temp.TextValue(value=startDate),
+                Temp.TextValue(value=startTiming)
+            ],
+                    ),
+                )
                 return "rescheduled round trip"
     return "cant't reschedule", 400
 
@@ -1273,59 +1337,61 @@ def getPrice():
     destination = incoming_msg['destination']
     tripType = incoming_msg['trip_type']
     userId = incoming_msg['user_id']
-    zoneName = origin.upper()
     zones = list(db['Zone'].find())
     zoneDetail = find_lat_lng_zone(origin)
     nearest_zone = find_nearest_zone(zones, float(zoneDetail['lat']), float(zoneDetail['lng']))
+    print(nearest_zone)
     if nearest_zone:
         zoneName = nearest_zone['zone_name'].upper()
-    user = ''
-    if userId:
-        user = db['Customer'].find_one({"_id": ObjectId(userId)})
-    
-    my_dist = gmaps.distance_matrix(origin, destination)['rows'][0]['elements'][0]
-    distance = float(my_dist['distance']['text'].split(' ')[0].replace(',', ''))
-    
-    if tripType != 'oneWay':
-        twoWayDistance = float(gmaps.distance_matrix(destination, origin)['rows'][0]['elements'][0]['distance']['text'].split(' ')[0].replace(',', ''))
-    else:
-        twoWayDistance = 0
-
-    duration_text = my_dist['duration']['text'] if tripType == 'oneWay' else incoming_msg['trip_duration']
-    duration_parts = duration_text.split(' ')
-
-    total_hours = 0
-    total_minutes = 0
-    
-
-    for i in range(0, len(duration_parts), 2):
-        value = int(duration_parts[i])
-        unit = duration_parts[i+1].lower()
+        user = ''
+        if userId:
+            user = db['Customer'].find_one({"_id": ObjectId(userId)})
         
-        if 'hour' in unit:
-            total_hours += value
-        elif 'min' in unit:
-            total_minutes += value
-        elif 'day' in unit:
-            total_hours += value * 24 
+        my_dist = gmaps.distance_matrix(origin, destination)['rows'][0]['elements'][0]
+        distance = float(my_dist['distance']['text'].split(' ')[0].replace(',', ''))
+        
+        if tripType != 'oneWay':
+            twoWayDistance = float(gmaps.distance_matrix(destination, origin)['rows'][0]['elements'][0]['distance']['text'].split(' ')[0].replace(',', ''))
+        else:
+            twoWayDistance = 0
 
-    allDuration = total_hours if total_minutes == 0 else total_hours + 1
-    price = calculateOneWayPricing(zoneName, int(distance), allDuration, tripType, twoWayDistance)
-    payload = {
-        'originZone': zoneName,
-        'toLocation': destination,
-        'duration': allDuration,
-        'distance': int(distance) if tripType == 'oneWay' else int(distance + twoWayDistance),
-        'price': price
-    }
+        duration_text = my_dist['duration']['text'] if tripType == 'oneWay' else incoming_msg['trip_duration']
+        duration_parts = duration_text.split(' ')
 
-    if user:
-        db['Customer'].update_one(
-            {'_id': ObjectId(userId)},
-            {"$push": {"search_history": payload}}
-        )
+        total_hours = 0
+        total_minutes = 0
+        
 
-    return jsonify(payload)
+        for i in range(0, len(duration_parts), 2):
+            value = int(duration_parts[i])
+            unit = duration_parts[i+1].lower()
+            
+            if 'hour' in unit:
+                total_hours += value
+            elif 'min' in unit:
+                total_minutes += value
+            elif 'day' in unit:
+                total_hours += value * 24 
+
+        allDuration = total_hours if total_minutes == 0 else total_hours + 1
+        price = calculateOneWayPricing(zoneName, int(distance), allDuration, tripType, twoWayDistance)
+        payload = {
+            'originZone': zoneName,
+            'toLocation': destination,
+            'duration': allDuration,
+            'distance': int(distance) if tripType == 'oneWay' else int(distance + twoWayDistance),
+            'price': price
+        }
+
+        if user:
+            db['Customer'].update_one(
+                {'_id': ObjectId(userId)},
+                {"$push": {"search_history": payload}}
+            )
+
+        return jsonify(payload)
+    else:
+        return "We dont serve on that zone", 400
 
 def calculateLastPrice(zone, distance, duration,trip, vehicleType):
     zoneName = db['Zone'].find_one({"zone_name": zone})
@@ -1358,6 +1424,7 @@ def find_lat_lng_zone(zone):
     r = gmaps.geocode(zone)
     l = r[0]['geometry']['location']['lat']
     ln = r[0]['geometry']['location']['lng']
+    print(l, ln)
     return {"lat": l, "lng": ln}
 
 
