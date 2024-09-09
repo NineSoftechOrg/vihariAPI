@@ -530,6 +530,7 @@ def trips(current):
         zones = i['orginZone']
         vehicle_type = i['car_type']
         userInfo = customer.find_one({"_id": i['user_id']})
+        print(userInfo)
         f.append(
             {
                "orderId": i["_id"],
@@ -543,7 +544,7 @@ def trips(current):
                "car_type": i['car_type'],
                "travel_date": i['travel_date'],
                "starting_time": i['trip_start_datetime'],
-               "display_name": userInfo['firstname'] + userInfo['lastname'],
+               "display_name": userInfo['firstname'] + ' ' + userInfo['lastname'],
                "mobile": userInfo['mobile']
             }
         )
@@ -764,7 +765,7 @@ def createCustomer():
         customer.insert_one(customer_dict)
         
     # print(incoming_msg)
-    return "working...."
+    return "User has succefully singed up"
 
 @app.route('/checkCustomer', methods=["POST"])
 def checkCustomer():
