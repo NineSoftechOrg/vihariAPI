@@ -96,7 +96,7 @@ def token_required(f):
                 "message": "Something went wrong",
                 "data": None,
                 "error": str(e)
-            }, 500
+            }, 400
 
         return f(current_user, *args, **kwargs)
 
@@ -290,6 +290,7 @@ def setBooking():
         
         carZone = db['Zone'].find_one({"_id": capacity['zone_id']})
         
+        
         payload = {
             "orginZone": incoming_msg['from'],
             "to": incoming_msg['to'],
@@ -310,7 +311,7 @@ def setBooking():
             'booking_price': '',
             'payment_status': 'Paid' if incoming_msg['payment_type'] != "COD" else "PENDING",
             'payment_type': incoming_msg['payment_type'],
-            'user_id': customer['_id'] or driver['_id'] or zoneAdmin['_id'],
+            'user_id': customer and customer['_id'] or driver and driver['_id'] or zoneAdmin['_id'],
             'extra_payment_details': '',
             'pickup_location': incoming_msg['pickup'],
             'zone_id': zone['_id'],
@@ -324,7 +325,8 @@ def setBooking():
         # print(j['_id'])
         # payload['bookingId'] = str(j['_id'])
 
-        user = db["Customer"].update_one({
+        if customer:
+            db["Customer"].update_one({
             "_id": ObjectId(incoming_msg['user_id']),
         } , {
             '$push': {
@@ -333,13 +335,37 @@ def setBooking():
         }
         
         )
+        elif driver:
+            db['Driver'].update_one({
+            "_id": ObjectId(incoming_msg['user_id']),
+        } , {
+            '$push': {
+                "booking_history": payload
+            }
+        }
+        
+        )
+        else:
+            db['ZoneAdmins'].update_one({
+            "_id": ObjectId(incoming_msg['user_id']),
+        } , {
+            '$push': {
+                "booking_history": payload
+            }
+        }
+        )
+
+
+        number = customer or driver or zoneAdmin
+        print(number['mobile'])
+        firstName = number['firstname']
         wa.send_template(
-                to=customer['mobile'],
+                to=number['mobile'],
                     template=Temp(
                     name='successful_booking',
                     language=Temp.Language.ENGLISH,
                     body=[
-            Temp.TextValue(value=customer['firstname']),
+            Temp.TextValue(value=str(firstName)),
             Temp.TextValue(value=str(ObjectId(j['_id']))),
             Temp.TextValue(value=payload['status']),
             Temp.TextValue(value=payload['orginZone']),
@@ -524,12 +550,15 @@ def trips(current):
     zone = db["Zone"]
     driver = db['Driver']
     customer = db['Customer']
+    zoneAdmin = db['ZoneAdmins']
     all = list(bookings.find())
     f = []
     for i in all:
         zones = i['orginZone']
         vehicle_type = i['car_type']
         userInfo = customer.find_one({"_id": i['user_id']})
+        driverInfo = driver.find_one({"_id": i['user_id']})
+        zoneAdminInfo = zoneAdmin.find_one({"_id": i['user_id']})
         print(userInfo)
         f.append(
             {
@@ -544,8 +573,9 @@ def trips(current):
                "car_type": i['car_type'],
                "travel_date": i['travel_date'],
                "starting_time": i['trip_start_datetime'],
-               "display_name": userInfo['firstname'] + ' ' + userInfo['lastname'],
-               "mobile": userInfo['mobile']
+               "display_name": userInfo and userInfo['firstname'] + ' ' + userInfo['lastname'] or driverInfo and driver['firstname'] + ' ' + driverInfo['lastname'] or zoneAdminInfo['firstname'] + " " + zoneAdminInfo['lastname'],
+               "mobile": userInfo and userInfo['mobile'] or driverInfo and driverInfo['mobile'] or zoneAdminInfo['mobile'],
+               "zoneId": i['zone_id']
             }
         )
     # print(f)
