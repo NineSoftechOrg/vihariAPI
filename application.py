@@ -42,7 +42,7 @@ app.config['CACHE_DEFAULT_TIMEOUT'] = os.environ.get('CACHE_DEFAULT_TIMEOUT')
 
 
 
-client = MongoClient("mongodb+srv://bamsi:Alcuduur40@cluster0.vtlehsn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", tlsCAFile=ca)
+client = MongoClient("mongodb+srv://adminvcabs:pzk3HkrErBu1PZBA@viharicabs.k2fze.mongodb.net/", tlsCAFile=ca)
 
 db = client["vihari"]
 CORS(app, resources={r"/*": {"origins": "*"}})
