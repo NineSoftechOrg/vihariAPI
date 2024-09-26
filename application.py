@@ -51,6 +51,9 @@ wa = WhatsApp(
 )
 client = MongoClient("mongodb+srv://adminvcabs:pzk3HkrErBu1PZBA@viharicabs.k2fze.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", tlsCAFile=ca)
 
+
+client = MongoClient("mongodb+srv://adminvcabs:pzk3HkrErBu1PZBA@viharicabs.k2fze.mongodb.net/", tlsCAFile=ca)
+
 db = client["vihari"]
 CORS(app, resources={r"/*": {"origins": "*"}})
 
