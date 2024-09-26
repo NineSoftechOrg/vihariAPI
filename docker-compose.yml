@@ -4,6 +4,8 @@ services:
     container_name: backend
     build: ./
     command: gunicorn -b 0.0.0.0:8080 application:app --reload
+    environment:
+      - WHATSAPP_TOKEN=EAAFaFIJHIucBO0TbLbCGlHV1YVtUJP9rSkG0NnwLGYir78KtHTuj5Dg9n68fidqCYfREZBsUAXiQt5UtMZA34nH3IZBITpMGwiLFT4pEGKwOzK83lkg8qKcGY5EyO9j5fGEitMIy1gKNwkRbEEM0A3ZAUQKtDFMRrCDOq0Ivwu3SkTCgrBJ0RioPwED0Br6zswZDZD
     working_dir: /usr/vihariApi/
     ports:
       - "8080:8080"
