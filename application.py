@@ -151,16 +151,17 @@ def start():
     #     return jsonify({'nearest_zone': nearest_zone['id']})
     # r = gmaps.geocode("ELURU, ANDHRA PRADESH, INDIA")
     # print(r[0]['geometry']['location'])
-    wa.send_template(
-                to="+917710285988",
-                    template=Temp(
-                    name='arrived',
-                    language=Temp.Language.ENGLISH,
-                    body=[
-                        Temp.TextValue(value=user['firstname']),
-                    ]
-                ),
-            )
+    
+    # wa.send_template(
+    #             to="+917710285988",
+    #                 template=Temp(
+    #                 name='arrived',
+    #                 language=Temp.Language.ENGLISH,
+    #                 body=[
+    #                     Temp.TextValue(value=user['firstname']),
+    #                 ]
+    #             ),
+    #         )
     return "vihari api working..."
 
 
