@@ -1,10 +1,28 @@
 version: 1.0
-runtime: python3 
+runtime: python311
 build:
   commands:
     build:
-      - pip install -r requirements.txt
-run: 
-  command: gunicorn 'hello:app'
-  network: 
+      - python3 -m ensurepip --upgrade # Upgrade pip (optional)
+      - pip3 install pipenv
+      - pipenv install
+      - pip3 install -r requirements.txt
+  env:
+    - name: DEBUG
+      value: "on"
+    - name: ALLOWED_HOSTS
+      value: "*"
+run:
+  runtime-version: 3.11
+  pre-run:  
+  - pip3 install pipenv
+  - pipenv install
+  command: pipenv run gunicorn application:app --log-file -
+  network:
     port: 8000
+    env: 8000
+  env:
+    - name: MONGODB_URL
+      value: "mongodb+srv://adminvcabs:pzk3HkrErBu1PZBA@viharicabs.k2fze.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+    - name: WHATSAPP_TOKEN
+      value: "EAAFaFIJHIucBO0TbLbCGlHV1YVtUJP9rSkG0NnwLGYir78KtHTuj5Dg9n68fidqCYfREZBsUAXiQt5UtMZA34nH3IZBITpMGwiLFT4pEGKwOzK83lkg8qKcGY5EyO9j5fGEitMIy1gKNwkRbEEM0A3ZAUQKtDFMRrCDOq0Ivwu3SkTCgrBJ0RioPwED0Br6zswZDZD"
